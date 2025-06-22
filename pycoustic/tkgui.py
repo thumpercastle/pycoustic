@@ -2,8 +2,8 @@ import tkinter as tk
 from tkinter import filedialog ,Toplevel, IntVar, Checkbutton, Button
 from tkinter import ttk
 from tkinter import messagebox
-from .log import Log
-from .survey import Survey
+from log import Log
+from survey import Survey
 import os
 import pandas as pd
 from tkinter import StringVar
@@ -212,11 +212,11 @@ class Application(tk.Tk):
                 df =self.survey.resi_summary(leq_cols=p[0], max_cols=p[1], lmax_n=int(params[2]), lmax_t=params[3])  
                 print ("df id a ",type(df))
             elif analysis_type == "modal_l90":
-                df = self.survey.modal_l90()
+                df = self.survey.modal()
             elif analysis_type == "lmax_spectra":
                 df = self.survey.lmax_spectra()
-            elif analysis_type == "Typical_leq_spectra":
-                df = self.survey.typical_leq_spectra()
+            elif analysis_type == "Leq_spectra":
+                df = self.survey.leq_spectra()
             else:
                 messagebox.showerror("Error", "Please select an analysis type.")
                 return
