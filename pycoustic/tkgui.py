@@ -11,6 +11,7 @@ from tkinter import StringVar
 #from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 #from src import log  # Assuming log is an instance of a class with the required methods
+test = 0
 
 class Application(tk.Tk):
     

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pycoustic"
-version = "0.1.1"
+version = "0.1.2"
 description = ""
 authors = ["thumpercastle <tony.ryb@gmail.com>"]
 readme = "README.md"
@@ -10,6 +10,7 @@ python = "^3.10"
 pandas = "2.2.3"
 numpy = "2.2.6"
 openpyxl = "3.1.5"
+requests = "^2.32.4"
 
 
 [build-system]

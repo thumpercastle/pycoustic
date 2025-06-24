@@ -1,6 +1,12 @@
 import pandas as pd
 import numpy as np
+from .weather import WeatherHistory
 
+
+DECIMALS=0
+
+# pd.set_option('display.max_columns', None)
+# pd.set_option('display.max_rows', None)
 
 class Survey:
     """
@@ -12,6 +18,7 @@ class Survey:
 
     def __init__(self):
         self._logs = {}
+        self._weather = WeatherHistory()
 
     def _insert_multiindex(self, df=None, super=None, name1="Position", name2="Date"):
         subs = df.index.to_list()   # List of subheaders (dates)
@@ -280,6 +287,18 @@ class Survey:
         combi = pd.concat(all_pos, axis=1, keys=["UA1", "UA2"])
         combi = combi.transpose()
         return combi
+
+    def get_start_end(self):
+        starts = [self._logs[key].get_start() for key in self._logs.keys()]
+        ends = [self._logs[key].get_end() for key in self._logs.keys()]
+        return min(starts), max(ends)
+
+    def weather(self, interval=6, api_key="", country="GB", postcode="WC1", tz="",):
+        start, end = self.get_start_end()
+        self._weather.reinit(start=start, end=end, interval=interval, api_key=api_key, country=country,
+                             postcode=postcode, tz=tz, units="metric")
+        self._weather.compute_weather_history()
+        return self._weather.get_weather_history()
 
     # def typical_leq_spectra(self, leq_cols=None):
     #     """
