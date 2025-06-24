@@ -3,11 +3,7 @@
 pycoustic is a Python-based toolkit designed to assist acoustic consultants and engineers in analyzing noise survey data. The library provides various tools and utilities for processing, interpreting, and visualizing noise measurements.
 
 ## Requirements
-This toolkit was written in Python 3.10, and using the following packages.
-- pandas 2.2.3
-- numpy 2.1.3
-- openpyxl 3.1.5
-- python-docx 0.8.11 (not currently implemented and will be updated).
+This toolkit was written in Python 3.12. See the pyrpoject.toml for the latest dependencies.
 
 ## Features
 - Import and process noise survey data from .csv files
