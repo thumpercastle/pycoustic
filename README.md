@@ -3,7 +3,7 @@
 pycoustic is a Python-based toolkit designed to assist acoustic consultants and engineers in analyzing noise survey data. The library provides various tools and utilities for processing, interpreting, and visualizing noise measurements.
 
 ## Requirements
-This toolkit was written in Python 3.12. See the pyrpoject.toml for the latest dependencies.
+This toolkit was written in Python 3.12. See the pyproject.toml file for the latest dependencies. We recommend using Poetry to manage the packages.
 
 ## Features
 - Import and process noise survey data from .csv files
@@ -23,23 +23,32 @@ Make sure your input data is in the correct format. See the file UA1_py.csv for 
 - Column headers should be in the Tuple-like format as per the example csv files attached. The measurement index should be first, and the frequency band or weighting should be second. e.g. the LAeq column should have the header *"Leq A"*, the L90 column at 125 Hz should have the header *"L90 125"*, and so on.
 - Make sure you past your data and columns into a fresh csv tab. If you end up having to chop the data and delete columns or rows, repaste it into a fresh tab when it is ready to be presented to the toolkit. Failure to do so can result in a ValueError. See **Troubleshooting** below.
 - If you do use this toolkit, please attribute it appropriately, and carry out your own checks to ensure you are satisfied with the outputs. See **Terms of Use** below.
+
+### Installing the package
+pycoustic can be installed using pip. The pypi project page is here: https://pypi.org/project/pycoustic/
+
+In your command line or Powershell terminal, type
+```
+pip install pycoustic
+```
+
 ### Basic Workflow
 1. **Import the library**\
-   Import the library into your script or active console.
+   Import the library into your script or active Python console.
    ```
-   from pycoustic import*
+   import pycoustic as pc
    ```
 2. **Load Data**\
    A single measurement position can be loaded into a Log object.
    ```
-   log1 = Log(path="path/to/data_for_pos1.csv")
-   log2 = Log(path="path/to/data_for_pos2.csv")
+   log1 = pc.Log(path="path/to/data_for_pos1.csv")
+   log2 = pc.Log(path="path/to/data_for_pos2.csv")
    ```
 3. **Combine Data**\
    The data from multiple measurement positions can be combined together within a Survey object.
    First we need to create a Survey object, and then add each Log one at a time.
    ```
-   surv = Survey()
+   surv = pc.Survey()
    surv.add_log(data=log1, name="Position 1")
    surv.add_log(data=log2, name="Position 2")
    ```
@@ -54,15 +63,20 @@ Make sure your input data is in the correct format. See the file UA1_py.csv for 
    **lmax_n** *Int* *(default 10)* The nth-highest value to present.\
    **lmax_t** *Str* *(default "2min")* The time period T over which Lmaxes are presented. This must be equal to or longer than the period of the raw data.
    
-   ### Survey.modal_l90()
+   ## Survey.modal_l90()
    Compute the modal L90 for daytime, evening (if enabled) and night-time periods. By default, this is set to T=60min for (23:00 to 07:00) periods, and T=15min for night-time (23:00 to 07:00) periods, as per BS 4142:2014.
-   
-   ### Survey.lmax_spectra()
+      
+   ## Survey.lmax_spectra()
    Compute the Lmax Event spectra for the nth-highest Lmax during each night-time period.\
    **Note** the date presented alongside the Lmax event is actually the starting date of the night-time period. i.e. an Lmax event with a stamp of 20/12/2024 at 01:22 would actually have occurred on 21/12/2024 at 01:22. These stamps can also sometimes be out by a minute (known bug).
    
-   ### Survey.typical_leq_spectra()
+   ## Survey.typical_leq_spectra()
    Compute the Leq spectra for daytime, evening (if enabled) and night-time periods. This will present the overall Leqs across the survey, not the Leq for each day.
+
+   ## Survey.weather()
+   Returns a pandas dataframe of the weather history over the course of your survey.
+   Requires an **api_key** argument. This method makes a call to the OpenWeatherMap OneCall API (see https://openweathermap.org/api). You need to sign up and pass your API key as a string to the weather() method.
+   
    
 
 ### Other methods
