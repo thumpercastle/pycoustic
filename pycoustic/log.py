@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import datetime as dt
-import warnings
+
 
 
 class Log:
@@ -356,3 +356,9 @@ class Log:
             return False
         else:
             return True
+
+    def get_start(self):
+        return self._start
+
+    def get_end(self):
+        return self._end
