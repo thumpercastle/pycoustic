@@ -54,6 +54,7 @@ pip install pycoustic
    ```
 4. **Analyse the Survey Data**
    The following are methods of the Survey() object representing the typical use cases for acoustic consultants in the UK.
+   
    ### Survey.resi_summary()
    This method provides a summary of the measurement data for residential projects, with a focus on typical assessment procedures in the UK.
    It presents A-weighted Leqs for each day and night period (and evenings, if enabled), as well as the nth-highest LAmax during each night-time period.
@@ -63,21 +64,26 @@ pip install pycoustic
    **lmax_n** *Int* *(default 10)* The nth-highest value to present.\
    **lmax_t** *Str* *(default "2min")* The time period T over which Lmaxes are presented. This must be equal to or longer than the period of the raw data.
    
-   ## Survey.modal_l90()
+   ## Survey.modal()
    Compute the modal L90 for daytime, evening (if enabled) and night-time periods. By default, this is set to T=60min for (23:00 to 07:00) periods, and T=15min for night-time (23:00 to 07:00) periods, as per BS 4142:2014.
       
+   ## Survey.counts()
+   Returns the L90 counts for daytime, evening and night-time periods. You can also choose to include other columns.
+
    ## Survey.lmax_spectra()
    Compute the Lmax Event spectra for the nth-highest Lmax during each night-time period.\
    **Note** the date presented alongside the Lmax event is actually the starting date of the night-time period. i.e. an Lmax event with a stamp of 20/12/2024 at 01:22 would actually have occurred on 21/12/2024 at 01:22. These stamps can also sometimes be out by a minute (known bug).
    
-   ## Survey.typical_leq_spectra()
+   ## Survey.leq_spectra()
    Compute the Leq spectra for daytime, evening (if enabled) and night-time periods. This will present the overall Leqs across the survey, not the Leq for each day.
-
+ 
    ## Survey.weather()
    Returns a pandas dataframe of the weather history over the course of your survey.
    Requires an **api_key** argument. This method makes a call to the OpenWeatherMap OneCall API (see https://openweathermap.org/api). You need to sign up and pass your API key as a string to the weather() method.
    
-   
+   ## Survey.weather_summary()
+   Returns a pandas dataframe summary of the weather history, comprising maximum, minimum and mean values.
+   You must have called Survey.weather() at least once before to get the summary.
 
 ### Other methods
 ### Known issues
