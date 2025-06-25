@@ -5,8 +5,11 @@ from .weather import WeatherHistory
 
 DECIMALS=0
 
-# pd.set_option('display.max_columns', None)
-# pd.set_option('display.max_rows', None)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.max_rows', None)
+
+#survey.leq_spectra() bug
+#TODO: C:\Users\tonyr\PycharmProjects\src\.venv1\Lib\site-packages\src\survey.py:287: FutureWarning: The behavior of pd.concat with len(keys) != len(objs) is deprecated. In a future version this will raise instead of truncating to the smaller of the two sequences combi = pd.concat(all_pos, axis=1, keys=["UA1", "UA2"])
 
 class Survey:
     """
@@ -19,6 +22,7 @@ class Survey:
     def __init__(self):
         self._logs = {}
         self._weather = WeatherHistory()
+        self._weatherhist = None
 
     def _insert_multiindex(self, df=None, super=None, name1="Position", name2="Date"):
         subs = df.index.to_list()   # List of subheaders (dates)
@@ -95,6 +99,7 @@ class Survey:
         :return: A dataframe presenting a summary of the Leq and Lmax values requested.
         """
         combi = pd.DataFrame()
+        period_headers = []
         if leq_cols is None:
             leq_cols = [("Leq", "A")]
         if max_cols is None:
@@ -293,12 +298,16 @@ class Survey:
         ends = [self._logs[key].get_end() for key in self._logs.keys()]
         return min(starts), max(ends)
 
-    def weather(self, interval=6, api_key="", country="GB", postcode="WC1", tz="",):
-        start, end = self.get_start_end()
-        self._weather.reinit(start=start, end=end, interval=interval, api_key=api_key, country=country,
-                             postcode=postcode, tz=tz, units="metric")
-        self._weather.compute_weather_history()
-        return self._weather.get_weather_history()
+    def weather(self, interval=6, api_key="", country="GB", postcode="WC1", tz="", recompute=False,
+                drop_cols=None):
+        if drop_cols is None:
+            drop_cols = ["sunrise", "sunset", "feels_like", "dew_point", "visibility"]
+        if self._weatherhist == None or recompute:
+            start, end = self.get_start_end()
+            self._weather.reinit(start=start, end=end, interval=interval, api_key=api_key, country=country,
+                                 postcode=postcode, tz=tz, units="metric")
+            self._weatherhist = self._weather.compute_weather_history(drop_cols=drop_cols)
+        return self._weatherhist
 
     # def typical_leq_spectra(self, leq_cols=None):
     #     """

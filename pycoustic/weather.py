@@ -71,28 +71,28 @@ class WeatherHistory:
 
     def _make_and_parse_api_call(self, query):
         response = requests.get(query)
-        print(response.json())
+        # print(response.json())
         # This drops some unwanted cols like lat, lon, timezone and tz offset.
         resp_dict = response.json()["data"][0]
         del resp_dict["weather"]    # delete weather key as not useful.
         # TODO: parse 'weather' nested dict.
         return resp_dict
 
-    def compute_weather_history(self):
+    def compute_weather_history(self, drop_cols):
         # construct timestamps
         timestamps = self._construct_timestamps()
         # make calls to API
         responses = []
         for ts in timestamps:
-            print(f"ts: {ts}")
+            # print(f"ts: {ts}")
             query = self._construct_api_call(timestamp=ts)
             response_dict = self._make_and_parse_api_call(query=query)
             responses.append(pd.Series(response_dict))
         df = pd.concat(responses, axis=1).transpose()
         for col in ["dt", "sunrise", "sunset"]:
             df[col] = df[col].apply(lambda x: dt.datetime.fromtimestamp(int(x)))  # convert timestamp into datetime
-        print(df)
-        self._hist = df
+        # print(df)
+        df.drop(columns=drop_cols, inplace=True)
         return df
 
     def get_weather_history(self):
