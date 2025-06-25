@@ -3,13 +3,14 @@ import numpy as np
 from .weather import WeatherHistory
 
 
-DECIMALS=0
+DECIMALS=1
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
 
 #survey.leq_spectra() bug
-#TODO: C:\Users\tonyr\PycharmProjects\src\.venv1\Lib\site-packages\src\survey.py:287: FutureWarning: The behavior of pd.concat with len(keys) != len(objs) is deprecated. In a future version this will raise instead of truncating to the smaller of the two sequences combi = pd.concat(all_pos, axis=1, keys=["UA1", "UA2"])
+#TODO: C:\Users\tonyr\PycharmProjects\pycoustic\.venv1\Lib\site-packages\pycoustic\survey.py:287: FutureWarning: The behavior of pd.concat with len(keys) != len(objs) is deprecated. In a future version this will raise instead of truncating to the smaller of the two sequences combi = pd.concat(all_pos, axis=1, keys=["UA1", "UA2"])
+
 
 class Survey:
     """
@@ -199,6 +200,15 @@ class Survey:
         return combi
 
     def counts(self, cols=None, day_t="60min", evening_t="60min", night_t="15min"):
+        """
+        Returns counts for each time period. For example, this can return the number of L90 occurrences at each decibel
+        level for daytime and night-time periods.
+        :param cols: Which columns to consider. Default (L90, A).
+        :param day_t: Daytime averaging period. Default 60min.
+        :param evening_t: Evening average period. Default 60min.
+        :param night_t: Night-time average period. Default 15min.
+        :return: Returns a dataframe of counts for each time period.
+        """
         if cols is None:
             cols = [("L90", "A")]
         combi = pd.DataFrame()
@@ -227,6 +237,7 @@ class Survey:
             pos_df = self._insert_multiindex(pos_df, super=key)
             combi = pd.concat([combi, pos_df], axis=0)
         combi = self._insert_header(df=combi, new_head_list=period_headers, header_idx=0)
+        #TODO: This dataframe needs tidying.
         return combi
 
     def lmax_spectra(self, n=10, t="2min", period="nights"):
@@ -258,8 +269,6 @@ class Survey:
             combi = pd.concat(objs=[combi, summary], axis=0)
         return combi
 
-    # TODO: get_lowest_l90
-
     def leq_spectra(self, leq_cols=None):
         """
         Compute Leqs over daytime, evening and night-time periods.
@@ -268,7 +277,7 @@ class Survey:
         For all Leq columns, use ["Leq"]. For specific columns, use list of tuples [("Leq", "A"), ("Leq", 125)]
         :return: A dataframe with a continuous Leq computation across dates, for each time period.
         """
-        #TODO: C:\Users\tonyr\PycharmProjects\src\tests.py:674: FutureWarning: The behavior of pd.concat with len(keys) != len(objs) is deprecated. In a future version this will raise instead of truncating to the smaller of the two sequences combi = pd.concat(all_pos, axis=1, keys=["UA1", "UA2"])
+        #TODO: C:\Users\tonyr\PycharmProjects\pycoustic\tests.py:674: FutureWarning: The behavior of pd.concat with len(keys) != len(objs) is deprecated. In a future version this will raise instead of truncating to the smaller of the two sequences combi = pd.concat(all_pos, axis=1, keys=["UA1", "UA2"])
         all_pos = []
         if leq_cols is None:
             leq_cols = ["Leq"]
@@ -298,59 +307,23 @@ class Survey:
         ends = [self._logs[key].get_end() for key in self._logs.keys()]
         return min(starts), max(ends)
 
-    def weather(self, interval=6, api_key="", country="GB", postcode="WC1", tz="", recompute=False,
+    def weather(self, interval=6, api_key=None, country="GB", postcode="WC1", tz="", recompute=False,
                 drop_cols=None):
         if drop_cols is None:
             drop_cols = ["sunrise", "sunset", "feels_like", "dew_point", "visibility"]
-        if self._weatherhist == None or recompute:
+        if self._weatherhist is not None and recompute==False:
+            return self._weatherhist
+        else:
+            if api_key is None:
+                raise ValueError("api_key is required")
             start, end = self.get_start_end()
             self._weather.reinit(start=start, end=end, interval=interval, api_key=api_key, country=country,
                                  postcode=postcode, tz=tz, units="metric")
             self._weatherhist = self._weather.compute_weather_history(drop_cols=drop_cols)
         return self._weatherhist
 
-    # def typical_leq_spectra(self, leq_cols=None):
-    #     """
-    #     DEPRECATED 2025/06/05. Replaced by .leq_spectra() **TT**
-    #     Compute Leqs over daytime, evening and night-time periods.
-    #     This is an overall Leq, and does not group Leqs by date.
-    #     :param leq_cols: List of strings or List of Tuples.
-    #     For all Leq columns, use ["Leq"]. For specific columns, use list of tuples [("Leq", "A"), ("Leq", 125)]
-    #     :return: A dataframe with a continuous Leq computation across dates, for each time period.
-    #     """
-    #     combi = pd.DataFrame()
-    #     if leq_cols is None:
-    #         leq_cols = ["Leq"]
-    #     for key in self._logs.keys():
-    #         log = self._logs[key]
-    #         combined_list = []
-    #         # Day
-    #         days = log._get_period(data=log.get_antilogs(), period="days")
-    #         days = days[leq_cols].apply(lambda x: np.round(10*np.log10(np.mean(x)), DECIMALS))
-    #         #days.sort_index(inplace=True)
-    #         combined_list.append(days)
-    #         period_headers = ["Daytime" for i in range(len(leq_cols))]
-    #         # Evening
-    #         if log.is_evening():
-    #             evenings = log._get_period(data=log.get_antilogs(), period="evenings")
-    #             evenings = evenings[leq_cols].apply(lambda x: np.round(10*np.log10(np.mean(x)), DECIMALS))
-    #             evenings.sort_index(inplace=True)
-    #             combined_list.append(evenings)
-    #             for i in range(len(leq_cols)):
-    #                 period_headers.append("Evening")
-    #         # Night Leq
-    #         nights = log._get_period(data=log.get_antilogs(), period="nights")
-    #         nights = nights[leq_cols].apply(lambda x: np.round(10*np.log10(np.mean(x)), DECIMALS))
-    #         nights.sort_index(inplace=True)
-    #         combined_list.append(nights)
-    #         for i in range(len(leq_cols)):
-    #             period_headers.append("Night-time")
-    #         summary = pd.concat(objs=combined_list, axis=1)
-    #         summary = self._insert_multiindex(df=summary, super=key)
-    #         combi = pd.concat(objs=[combi, summary], axis=0)
-    #     new_head_dict = {}
-    #     for i in range(len(period_headers)):
-    #         new_head_dict[i] = period_headers[i]
-    #     combi.rename(columns=new_head_dict, inplace=True)
-    #     #combi = combi.transpose()
-    #     return combi
+    def weather_summary(self):
+        if self._weatherhist is None:
+            raise ValueError("No weather history available. Use Survey.weather() first.")
+        return pd.DataFrame([self._weatherhist.min(), self._weatherhist.max(), self._weatherhist.mean()],
+                            index=["Min", "Max", "Mean"]).drop(columns=["dt"]).round(decimals=1)

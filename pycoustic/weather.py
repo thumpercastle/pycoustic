@@ -2,7 +2,6 @@ import requests
 import pandas as pd
 import datetime as dt
 
-test=0
 
 appid = ""
 with open("tests/openweather_app_id.txt") as f:
@@ -17,6 +16,7 @@ w_dict = {
     "postcode": "WC1",
     "tz": "GB"
 }
+
 
 def test_weather_obj(weather_test_dict):
     hist = WeatherHistory(start=w_dict["start"], end=w_dict["end"], interval=w_dict["interval"],
@@ -58,7 +58,6 @@ class WeatherHistory:
         base = "https://api.openweathermap.org/data/3.0/onecall/timemachine?"
         query = str(base + "lat=" + str(self._lat) + "&" + "lon=" + str(self._lon) + "&" + "units=" + self._units + \
                     "&" + "dt=" + str(timestamp) + "&" + "appid=" + self._api_key)
-        print(query)
         return query
 
     def _construct_timestamps(self):
@@ -71,7 +70,6 @@ class WeatherHistory:
 
     def _make_and_parse_api_call(self, query):
         response = requests.get(query)
-        # print(response.json())
         # This drops some unwanted cols like lat, lon, timezone and tz offset.
         resp_dict = response.json()["data"][0]
         del resp_dict["weather"]    # delete weather key as not useful.
@@ -84,14 +82,12 @@ class WeatherHistory:
         # make calls to API
         responses = []
         for ts in timestamps:
-            # print(f"ts: {ts}")
             query = self._construct_api_call(timestamp=ts)
             response_dict = self._make_and_parse_api_call(query=query)
             responses.append(pd.Series(response_dict))
         df = pd.concat(responses, axis=1).transpose()
         for col in ["dt", "sunrise", "sunset"]:
             df[col] = df[col].apply(lambda x: dt.datetime.fromtimestamp(int(x)))  # convert timestamp into datetime
-        # print(df)
         df.drop(columns=drop_cols, inplace=True)
         return df
 

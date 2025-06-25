@@ -10,14 +10,14 @@ from tkinter import StringVar
 #import matplotlib
 #from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-#from src import log  # Assuming log is an instance of a class with the required methods
+#from pycoustic import log  # Assuming log is an instance of a class with the required methods
 test = 0
 
 class Application(tk.Tk):
     
     def __init__(self):
         super().__init__()
-        self.title("src Log Viewer")
+        self.title("pycoustic Log Viewer")
         self.geometry("1200x800")
         import tkinter as tk
 
