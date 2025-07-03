@@ -1,16 +1,18 @@
 [tool.poetry]
 name = "pycoustic"
-version = "0.1.6"
+version = "0.1.7"
 description = ""
 authors = ["thumpercastle <tony.ryb@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.12, <4.0"
+python = ">=3.11.9, <4.0"
 pandas = "2.2.3"
 numpy = "2.2.6"
 openpyxl = "3.1.5"
 requests = "^2.32.4"
+plotly = "6.1.2"
+streamlit = "^1.46.1"
 
 
 [build-system]
