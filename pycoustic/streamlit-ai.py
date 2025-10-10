@@ -1,10 +1,12 @@
-# Python 3.12
-# Streamlit app entrypoint for PyCoustic-like workflow
+# streamlit-ai.py
+# Streamlit UI for inspecting noise survey data and plots
 
 from __future__ import annotations
 
+import os
 import io
 import re
+import tempfile
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
@@ -12,510 +14,435 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from pycoustic import Log  # expects a Log class exposing a .df with a DateTimeIndex
 
-# -----------------------------
-# Plotting configuration
-# -----------------------------
+# Plot styling
 COLOURS: List[str] = [
-    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+    "#1f77b4",
+    "#ff7f0e",
+    "#2ca02c",
+    "#d62728",
+    "#9467bd",
+    "#8c564b",
+    "#e377c2",
+    "#7f7f7f",
+    "#bcbd22",
+    "#17becf",
 ]
 TEMPLATE: str = "plotly_white"
 
 
-# -----------------------------
-# Helpers
-# -----------------------------
-def _try_read_table(upload) -> pd.DataFrame:
-    # Try CSV first, then Excel
-    name = getattr(upload, "name", "uploaded")
-    data = upload.read() if hasattr(upload, "read") else upload.getvalue()
-    # ensure the buffer can be reused for Excel attempt
-    buf = io.BytesIO(data)
+def _try_read_table(
+    file_like_or_bytes: io.BytesIO | bytes | str,
+    filename: Optional[str] = None,
+    encoding: Optional[str] = None,
+) -> pd.DataFrame:
+    """
+    Attempt to read a tabular file (CSV preferred; Excel fallback).
+    - file_like_or_bytes may be a path, raw bytes, or a BytesIO-like object.
+    - filename helps determine the extension when not a path.
+    """
+    def _ensure_buffer(obj) -> io.BytesIO:
+        if isinstance(obj, (bytes, bytearray)):
+            return io.BytesIO(obj)
+        if hasattr(obj, "read"):
+            return obj  # assume file-like opened in binary mode
+        if isinstance(obj, str):
+            # Path-like; will be handled by pandas directly, so we return None
+            return None
+        raise TypeError("Unsupported input type for _try_read_table")
 
-    # CSV attempt
-    try:
-        df_csv = pd.read_csv(io.BytesIO(data))
-        if not df_csv.empty:
-            df_csv.attrs["__source_name__"] = name
-            return df_csv
-    except Exception:
-        pass
+    ext = None
+    if isinstance(file_like_or_bytes, str):
+        lower = file_like_or_bytes.lower()
+        if lower.endswith(".csv"):
+            ext = ".csv"
+        elif lower.endswith((".xlsx", ".xlsm", ".xlsb", ".xls")):
+            ext = ".xlsx"
+    elif filename:
+        lower = filename.lower()
+        if lower.endswith(".csv"):
+            ext = ".csv"
+        elif lower.endswith((".xlsx", ".xlsm", ".xlsb", ".xls")):
+            ext = ".xlsx"
 
-    # Excel attempt
-    buf.seek(0)
-    try:
-        df_xls = pd.read_excel(buf)
-        if not df_xls.empty:
-            df_xls.attrs["__source_name__"] = name
-            return df_xls
-    except Exception:
-        pass
+    # Prefer CSV
+    if ext in (None, ".csv"):
+        try:
+            if isinstance(file_like_or_bytes, str):
+                df = pd.read_csv(file_like_or_bytes, encoding=encoding)
+            else:
+                buf = _ensure_buffer(file_like_or_bytes)
+                if buf is None:  # pragma: no cover
+                    raise ValueError("Failed to open buffer for CSV")
+                df = pd.read_csv(buf, encoding=encoding)
+            return _flatten_columns(df)
+        except Exception:
+            # Try Excel as fallback
+            pass
 
-    raise ValueError(f"Could not parse file: {name}")
+    # Excel fallback
+    if isinstance(file_like_or_bytes, str):
+        df = pd.read_excel(file_like_or_bytes)
+    else:
+        buf = _ensure_buffer(file_like_or_bytes)
+        if buf is None:  # pragma: no cover
+            raise ValueError("Failed to open buffer for Excel")
+        df = pd.read_excel(buf)
+    return _flatten_columns(df)
 
 
 def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
-    # Flatten MultiIndex columns if any
+    """
+    Flatten MultiIndex columns into simple strings.
+    """
     if isinstance(df.columns, pd.MultiIndex):
-        flat = [" | ".join([str(x) for x in tup if x is not None]) for tup in df.columns]
         df = df.copy()
-        df.columns = flat
+        df.columns = [" ".join([str(p) for p in tup if p is not None]).strip() for tup in df.columns.values]
+    else:
+        # Ensure all columns are strings, stripped
+        df = df.rename(columns=lambda c: str(c).strip())
     return df
 
 
-def _maybe_parse_datetime(df: pd.DataFrame) -> pd.DataFrame:
-    # Heuristic: try common datetime column names and parse them
-    dt_candidates = ["Datetime", "DateTime", "Timestamp", "Time", "Date", "Date_Time", "datetime", "time", "timestamp"]
-    for col in df.columns:
-        if col in dt_candidates or re.search(r"time|date|stamp", str(col), re.IGNORECASE):
+def _maybe_parse_datetime(
+    df: pd.DataFrame,
+    candidates: Iterable[str] = ("timestamp", "time", "date", "datetime"),
+    utc: bool = False,
+) -> pd.DataFrame:
+    """
+    If a plausible timestamp column exists, convert to DatetimeIndex.
+    Does nothing if index is already DatetimeIndex.
+    """
+    if isinstance(df.index, pd.DatetimeIndex):
+        return df
+    df = df.copy()
+    lower_cols = {str(c).lower(): c for c in df.columns}
+    for key in candidates:
+        if key in lower_cols:
+            col = lower_cols[key]
             try:
-                parsed = pd.to_datetime(df[col], errors="raise", utc=False, infer_datetime_format=True)
-                out = df.copy()
-                out[col] = parsed
-                return out
+                ts = pd.to_datetime(df[col], utc=utc, errors="raise")
+                df = df.set_index(ts)
+                df.index.name = "timestamp"
+                return df.drop(columns=[col])
             except Exception:
                 continue
     return df
 
 
 def _detect_position_col(df: pd.DataFrame) -> Optional[str]:
-    candidates = ["Position", "Pos", "Mic", "Channel", "Location", "Site"]
-    for c in candidates:
-        if c in df.columns:
-            return c
-    # also try case-insensitive exact matches
-    lower_map = {str(c).lower(): c for c in df.columns}
-    for c in candidates:
-        if c.lower() in lower_map:
-            return lower_map[c.lower()]
+    """
+    Attempt to find a 'position' or 'location' column.
+    """
+    patterns = [
+        re.compile(r"\bposition\b", re.I),
+        re.compile(r"\bpos\b", re.I),
+        re.compile(r"\blocation\b", re.I),
+        re.compile(r"\bsite\b", re.I),
+    ]
+    for c in df.columns:
+        name = str(c)
+        for pat in patterns:
+            if pat.search(name):
+                return c
     return None
 
 
 def _metric_patterns() -> Dict[str, re.Pattern]:
-    # Detect wide spectral columns, e.g., "Leq_31.5", "Lmax_1000", "Leq 4k", "Lmax 1 kHz", "63 Hz"
-    # Strategy:
-    # - Either prefixed by a metric (Leq/Lmax) and then frequency
-    # - Or pure frequency with "Hz" and a separate metric column naming is handled by selection
-    def freq_part():
-        # numbers like 31.5, 1000, 1k, 2 kHz, etc.
-        return r"(?P<freq>(\d+(\.\d+)?)(\s*k(hz)?)?)"
-
-    # metric-first naming: "Leq_31.5", "Lmax 1000", "Leq-1k", "Leq 1 kHz"
-    metric_first = rf"^(?P<metric>Leq|Lmax)[\s_\-]*{freq_part()}(hz)?$"
-    # freq-first naming: "31.5", "63 Hz", "1k", with an optional suffix metric after a sep: "63Hz_Leq"
-    freq_first = rf"^{freq_part()}(hz)?[\s_\-]*(?P<metric>Leq|Lmax)?$"
+    """
+    Patterns for commonly used acoustic metrics.
+    """
+    # Matches LAeq, Leq A, Leq(A), etc.
     return {
-        "metric_first": re.compile(metric_first, re.IGNORECASE),
-        "freq_first": re.compile(freq_first, re.IGNORECASE),
+        "Leq": re.compile(r"\bL\s*eq\b(?:\s*\(?\s*A\s*\)?)?", re.I),
+        "Lmax": re.compile(r"\bL\s*max\b(?:\s*\(?\s*A\s*\)?)?", re.I),
+        "L90": re.compile(r"\bL\s*90\b(?:\s*\(?\s*A\s*\)?)?", re.I),
     }
 
 
-def _parse_freq_to_hz(freq_str: str) -> Optional[float]:
-    if freq_str is None:
+def _parse_freq_to_hz(label: str) -> Optional[float]:
+    """
+    Parse frequency-like column labels such as '63 Hz', '1k', '1 kHz', etc.
+    """
+    s = str(label).strip().lower()
+    m = re.match(r"^\s*([0-9]*\.?[0-9]+)\s*(k|khz|hz)?\s*$", s)
+    if not m:
         return None
-    s = str(freq_str).strip().lower().replace(" ", "")
-    s = s.replace("khz", "k").replace("hz", "")
-    # handle "1k" or "1.0k"
-    m = re.match(r"^(\d+(\.\d+)?)k$", s)
-    if m:
-        return float(m.group(1)) * 1000.0
-    try:
-        return float(s)
-    except Exception:
-        return None
+    val = float(m.group(1))
+    unit = m.group(2)
+    if not unit or unit == "hz":
+        return val
+    return val * 1000.0
 
 
-def spectra_to_rows(df: pd.DataFrame) -> pd.DataFrame:
+def spectra_to_rows(
+    df: pd.DataFrame,
+    value_col_name: str = "Level (dB)",
+) -> Optional[pd.DataFrame]:
     """
-    Convert wide spectral columns into a tidy long form:
-    Columns like "Leq_31.5", "Lmax 63", "63 Hz Leq" -> rows with Frequency (Hz), Metric, Value.
-    Non-spectral columns are carried along.
+    Convert wide spectra columns (e.g., '63 Hz', '1 kHz') into (freq_hz, value) rows.
+    Returns None if no spectra-like columns are detected.
     """
-    df = _flatten_columns(df)
-    patterns = _metric_patterns()
-
-    spectral_cols: List[Tuple[str, str, float]] = []  # (original_col, metric, freq_hz)
-    for col in df.columns:
-        col_str = str(col)
-        matched = False
-
-        # metric first
-        m1 = patterns["metric_first"].match(col_str)
-        if m1:
-            metric = m1.group("metric").upper()
-            freq_hz = _parse_freq_to_hz(m1.group("freq"))
-            if metric in ("LEQ", "LMAX") and freq_hz is not None:
-                spectral_cols.append((col, metric, freq_hz))
-                matched = True
-
-        if matched:
-            continue
-
-        # frequency first
-        m2 = patterns["freq_first"].match(col_str)
-        if m2:
-            metric = m2.group("metric")
-            metric = metric.upper() if metric else None
-            freq_hz = _parse_freq_to_hz(m2.group("freq"))
-            if freq_hz is not None:
-                # If metric is not embedded, we will treat it as "LEQ" by default for plotting,
-                # but also keep the column name when we pivot.
-                spectral_cols.append((col, metric or "LEQ", freq_hz))
-
-    if not spectral_cols:
-        return pd.DataFrame(columns=["Frequency_Hz", "Metric", "Value"])
-
-    # Build tidy rows
-    id_cols = [c for c in df.columns if c not in [c0 for (c0, _, _) in spectral_cols]]
-    tidies: List[pd.DataFrame] = []
-    for (col, metric, f_hz) in spectral_cols:
-        block = pd.DataFrame(
-            {
-                "Frequency_Hz": f_hz,
-                "Metric": metric,
-                "Value": df[col].astype("float64").values,
-            }
-        )
-        # Attach IDs if present
-        if id_cols:
-            block = pd.concat([df[id_cols].reset_index(drop=True), block], axis=1)
-        tidies.append(block)
-
-    tidy = pd.concat(tidies, axis=0, ignore_index=True)
-    # Sort by frequency numeric
-    tidy = tidy.sort_values(["Metric", "Frequency_Hz"]).reset_index(drop=True)
-    return tidy
-
-
-def _resample_if_possible(df: pd.DataFrame, how: str) -> pd.DataFrame:
-    """
-    how: '', '1min', '5min', '1H', '1D'
-    """
-    if not how:
-        return df
-
-    # find a datetime column
-    dt_col = None
+    freq_cols: List[Tuple[str, float]] = []
     for c in df.columns:
-        if pd.api.types.is_datetime64_any_dtype(df[c]):
-            dt_col = c
-            break
+        hz = _parse_freq_to_hz(c)
+        if hz is not None:
+            freq_cols.append((c, hz))
 
-    if dt_col is None:
-        return df  # nothing to resample on
+    if not freq_cols:
+        return None
 
-    df_sorted = df.sort_values(dt_col)
-    df_sorted = df_sorted.set_index(dt_col)
+    freq_cols_sorted = sorted(freq_cols, key=lambda x: x[1])
+    melted = df[fname_list := [c for c, _ in freq_cols_sorted]].copy()
+    melted.columns = [f"{hz:.6g}" for _, hz in freq_cols_sorted]
+    out = melted.melt(var_name="freq_hz", value_name=value_col_name)
+    out["freq_hz"] = out["freq_hz"].astype(float)
+    return out.sort_values("freq_hz").reset_index(drop=True)
 
-    # numeric only for resample
-    numeric_cols = df_sorted.select_dtypes(include=["number"]).columns
-    if len(numeric_cols) == 0:
+
+def _resample_if_possible(df: pd.DataFrame, rule: str = "1S") -> pd.DataFrame:
+    """
+    Downsample a DateTimeIndex DataFrame for responsiveness.
+    """
+    if not isinstance(df.index, pd.DatetimeIndex):
         return df
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    if numeric_cols.empty:
+        return df
+    return df[numeric_cols].resample(rule).median().dropna(how="all")
 
-    grouped = df_sorted[numeric_cols].resample(how).mean().reset_index()
-    # put back other columns in a sensible way (drop or take first)
-    return grouped
 
+def _build_summary(
+    df: pd.DataFrame,
+    position_col: Optional[str] = None,
+    metrics: Optional[Iterable[str]] = None,
+) -> pd.DataFrame:
+    """
+    Build simple summary stats for selected metrics, optionally grouped by position.
+    """
+    if metrics is None:
+        metrics = ["Leq", "Lmax", "L90"]
 
-def _build_summary(df: pd.DataFrame, group_cols: List[str]) -> pd.DataFrame:
-    if not group_cols:
-        # simple numeric summary
-        numeric_cols = df.select_dtypes(include=["number"]).columns
-        if len(numeric_cols) == 0:
-            return pd.DataFrame()
-        s = df[numeric_cols].agg(["count", "mean", "std", "min", "max"]).T.reset_index()
-        s.columns = ["Metric"] + list(s.columns[1:])
-        return s
+    pats = _metric_patterns()
+    metric_cols: Dict[str, List[str]] = {m: [] for m in metrics}
+    for c in df.columns:
+        for m in metrics:
+            if pats.get(m) and pats[m].search(str(c)):
+                metric_cols[m].append(c)
 
-    # groupby summary on numeric columns
-    numeric_cols = df.select_dtypes(include=["number"]).columns
-    if len(numeric_cols) == 0:
+    work = {}
+    for m, cols in metric_cols.items():
+        sel = df[cols].select_dtypes(include=[np.number]) if cols else pd.DataFrame()
+        if not sel.empty:
+            work[m] = sel.mean(axis=1)
+
+    if not work:
         return pd.DataFrame()
 
-    g = df.groupby(group_cols, dropna=False)[numeric_cols].agg(["count", "mean", "std", "min", "max"])
-    g = g.reset_index()
-
-    # flatten resulting MultiIndex columns
-    out_cols = []
-    for tup in g.columns:
-        if isinstance(tup, tuple):
-            lvl0, lvl1 = tup
-            if lvl1 == "":
-                out_cols.append(str(lvl0))
-            elif lvl0 in group_cols:
-                out_cols.append(str(lvl0))
-            else:
-                out_cols.append(f"{lvl0}__{lvl1}")
-        else:
-            out_cols.append(str(tup))
-    g.columns = out_cols
-    return g
-
-
-def _guess_resample_options(df: pd.DataFrame) -> List[Tuple[str, str]]:
-    # Label, pandas rule
-    has_dt = any(pd.api.types.is_datetime64_any_dtype(df[c]) for c in df.columns)
-    if not has_dt:
-        return [("None", "")]
-    return [
-        ("None", ""),
-        ("1 minute", "1min"),
-        ("5 minutes", "5min"),
-        ("15 minutes", "15min"),
-        ("Hourly", "1H"),
-        ("Daily", "1D"),
-    ]
-
-
-def _plot_spectra(tidy_spec: pd.DataFrame, color_by: Optional[str]) -> go.Figure:
-    fig = go.Figure()
-    if tidy_spec.empty:
-        fig.update_layout(template=TEMPLATE)
-        return fig
-
-    # X is frequency Hz (log10)
-    x = tidy_spec["Frequency_Hz"].to_numpy(dtype=float)
-
-    # determine trace grouping
-    if color_by and color_by in tidy_spec.columns:
-        groups = list(tidy_spec[color_by].astype(str).unique())
-        for i, key in enumerate(groups):
-            sub = tidy_spec[tidy_spec[color_by].astype(str) == str(key)]
-            # Keep metric separated as line style if available
-            if "Metric" in sub.columns and sub["Metric"].nunique() > 1:
-                for metric in sorted(sub["Metric"].unique()):
-                    subm = sub[sub["Metric"] == metric]
-                    fig.add_trace(
-                        go.Scatter(
-                            x=subm["Frequency_Hz"],
-                            y=subm["Value"],
-                            mode="lines+markers",
-                            name=f"{key} – {metric}",
-                            line=dict(color=COLOURS[i % len(COLOURS)], dash="solid" if metric == "LEQ" else "dash"),
-                            marker=dict(size=6),
-                        )
-                    )
-            else:
-                fig.add_trace(
-                    go.Scatter(
-                        x=sub["Frequency_Hz"],
-                        y=sub["Value"],
-                        mode="lines+markers",
-                        name=str(key),
-                        line=dict(color=COLOURS[i % len(COLOURS)]),
-                        marker=dict(size=6),
-                    )
-                )
+    agg_df = pd.DataFrame(work)
+    if position_col and position_col in df.columns:
+        agg_df[position_col] = df[position_col].values[: len(agg_df)]
+        g = agg_df.groupby(position_col, dropna=False).agg(["mean", "min", "max", "count"])
+        # Flatten columns
+        g.columns = [" ".join([str(p) for p in col if p]).strip() for col in g.columns.values]
+        return g.reset_index()
     else:
-        # single trace per metric
-        if "Metric" in tidy_spec.columns:
-            for i, metric in enumerate(sorted(tidy_spec["Metric"].unique())):
-                sub = tidy_spec[tidy_spec["Metric"] == metric]
-                fig.add_trace(
-                    go.Scatter(
-                        x=sub["Frequency_Hz"],
-                        y=sub["Value"],
-                        mode="lines+markers",
-                        name=str(metric),
-                        line=dict(color=COLOURS[i % len(COLOURS)]),
-                        marker=dict(size=6),
-                    )
-                )
-        else:
-            fig.add_trace(
-                go.Scatter(
-                    x=x,
-                    y=tidy_spec["Value"],
-                    mode="lines+markers",
-                    name="Spectrum",
-                    line=dict(color=COLOURS[0]),
-                    marker=dict(size=6),
-                )
-            )
+        return agg_df.agg(["mean", "min", "max", "count"]).T.reset_index(names=["Metric"])
 
+
+def _guess_resample_options(n: int) -> str:
+    """
+    Heuristically pick a resampling rule based on number of points.
+    """
+    if n > 200_000:
+        return "10S"
+    if n > 50_000:
+        return "5S"
+    if n > 10_000:
+        return "2S"
+    return "1S"
+
+
+def _plot_spectra(
+    df_rows: pd.DataFrame,
+    title: str = "Spectral Levels",
+    value_col_name: str = "Level (dB)",
+) -> go.Figure:
+    """
+    Plot spectra contained in a (freq_hz, value) rows dataframe.
+    """
+    fig = go.Figure()
+    if {"freq_hz", value_col_name}.issubset(df_rows.columns):
+        fig.add_trace(
+            go.Scatter(
+                x=df_rows["freq_hz"],
+                y=df_rows[value_col_name],
+                mode="lines+markers",
+                line=dict(color=COLOURS[0]),
+                name=value_col_name,
+            )
+        )
     fig.update_layout(
         template=TEMPLATE,
-        xaxis=dict(
-            type="log",
-            title="Frequency (Hz)",
-            tickvals=[31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000],
-            ticktext=["31.5", "63", "125", "250", "500", "1k", "2k", "4k", "8k"],
-            gridcolor="rgba(0,0,0,0.1)",
-        ),
-        yaxis=dict(title="Level (dB)", gridcolor="rgba(0,0,0,0.1)"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=50, r=30, t=40, b=50),
+        xaxis_title="Frequency (Hz)",
+        yaxis_title=value_col_name,
+        hovermode="x",
+        margin=dict(l=10, r=10, t=30, b=10),
+        title=title,
+    )
+    fig.update_xaxes(type="log", tickformat=".0f")
+    return fig
+
+
+def _download_csv_button(label: str, df: pd.DataFrame, file_name: str) -> None:
+    """
+    Render a download button for a dataframe as CSV.
+    """
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label=label,
+        data=csv_bytes,
+        file_name=file_name,
+        mime="text/csv",
+    )
+
+
+# === New helpers for DateTimeIndex-based Log flow ===
+
+@st.cache_data(show_spinner=False)
+def _load_log_df_from_bytes(file_bytes: bytes, file_suffix: str = ".csv") -> pd.DataFrame:
+    """
+    Persist uploaded bytes to a temp file and create a Log to obtain a DataFrame.
+    Requires Log().df to have a DateTimeIndex.
+    """
+    with tempfile.NamedTemporaryFile(delete=False, suffix=file_suffix) as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
+    try:
+        log = Log(path=tmp_path)
+        if hasattr(log, "df") and isinstance(log.df, pd.DataFrame):
+            df = log.df.copy()
+        else:
+            raise ValueError("Log() did not expose a DataFrame on .df")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError("Expected Log().df to have a DateTimeIndex for timestamps.")
+    return df
+
+
+def _find_metric_columns(df: pd.DataFrame) -> Dict[str, str]:
+    """
+    Locate the canonical metric columns using case-insensitive matching.
+    Returns a mapping from UI label to actual column name.
+    """
+    targets: List[str] = ["Leq A", "Lmax A", "L90 A"]
+    norm_map = {str(c).strip().lower(): c for c in df.columns}
+    found: Dict[str, str] = {}
+    for label in targets:
+        key = label.lower()
+        if key in norm_map:
+            found[label] = norm_map[key]
+    return found
+
+
+def _build_time_history_figure(df: pd.DataFrame, series_map: Dict[str, str]) -> go.Figure:
+    """
+    Build a Plotly figure for time history lines using the DataFrame's DateTimeIndex.
+    """
+    fig = go.Figure()
+    for i, (label, col) in enumerate(series_map.items()):
+        fig.add_trace(
+            go.Scatter(
+                x=df.index,
+                y=df[col],
+                mode="lines",
+                name=label,
+                line=dict(color=COLOURS[i % len(COLOURS)]),
+            )
+        )
+    fig.update_layout(
+        template=TEMPLATE,
+        xaxis_title="Timestamp",
+        yaxis_title="Level (dB)",
+        hovermode="x unified",
+        legend_title_text="Series",
+        margin=dict(l=10, r=10, t=30, b=10),
+        height=420,
     )
     return fig
 
 
-def _download_csv_button(label: str, df: pd.DataFrame, key: str):
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label=label,
-        data=csv,
-        file_name=f"{key}.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
+def main() -> None:
+    st.set_page_config(page_title="pycoustic - Noise survey toolkit", layout="wide")
+    st.title("Noise survey toolkit")
 
+    st.caption("Upload logs to visualize time histories. CSV files are supported.")
 
-# -----------------------------
-# UI
-# -----------------------------
-def main():
-    st.set_page_config(page_title="PyCoustic – Streamlit", layout="wide")
-
-    st.title("PyCoustic – Streamlit App")
-    st.caption("Upload measurement logs, explore summaries and spectra, and export results.")
-
-    with st.sidebar:
-        st.header("Inputs")
-        uploads = st.file_uploader(
-            "Upload one or more files (CSV or Excel)",
-            type=["csv", "txt", "xlsx", "xls"],
+    # === Time history plots based on Log().df with a DateTimeIndex ===
+    with st.expander("Time history plots (Leq A, Lmax A, L90 A)", expanded=True):
+        uploaded = st.file_uploader(
+            "Upload one or more CSV files",
+            type=["csv"],
             accept_multiple_files=True,
+            key="time_history_logs_uploader",
         )
 
-        st.markdown("---")
-        st.subheader("Options")
+        if uploaded:
+            # User options
+            max_points = st.number_input("Max points per series (downsampling)", 1_000, 1_000_000, value=10_000, step=1_000)
+            for file in uploaded:
+                st.markdown(f"**File:** {file.name}")
 
-        # These options approximate a typical workflow
-        resample_label = "Resample period"
-        resample_options: List[Tuple[str, str]] = [("None", "")]
-        # temporarily show None; we'll refine after reading a file
+                # Load via Log() and enforce DateTimeIndex
+                try:
+                    df = _load_log_df_from_bytes(file.getbuffer(), file_suffix=".csv")
+                except Exception as e:
+                    st.error(f"Could not load Log() from file: {e}")
+                    continue
 
-        # placeholder UI to avoid reflow
-        resample_choice_label = st.selectbox(resample_label, [x[0] for x in resample_options], index=0, key="resample_placeholder")
+                if df.empty:
+                    st.warning("No data available.")
+                    continue
 
-        group_hint = st.text_input("Optional Group Column (e.g., Position/Location)", value="")
+                # Ensure sorted index
+                df = df.sort_index()
 
-        st.markdown("---")
-        st.subheader("Spectra")
-        colour_by = st.text_input("Colour lines by column (e.g., Position or source)", value="source")
-        show_markers = st.checkbox("Show markers", value=True)
+                # Identify standard metric columns
+                available = _find_metric_columns(df)
+                missing = [label for label in ("Leq A", "Lmax A", "L90 A") if label not in available]
 
-        st.markdown("---")
-        st.subheader("Display")
-        show_raw_preview = st.checkbox("Show raw preview table", value=False)
+                if missing:
+                    st.info(f"Missing columns: {', '.join(missing)}")
 
-    if not uploads:
-        st.info("Upload files to begin.")
-        return
+                if not available:
+                    st.warning("None of the required columns were found. Expected any of: Leq A, Lmax A, L90 A.")
+                    continue
 
-    # Read and combine
-    logs: List[str] = []
-    frames: List[pd.DataFrame] = []
-    for uf in uploads:
-        try:
-            df = _try_read_table(uf)
-            df = _flatten_columns(df)
-            df = _maybe_parse_datetime(df)
-            df["source"] = getattr(uf, "name", df.attrs.get("__source_name__", "uploaded"))
-            frames.append(df)
-            logs.append(f"Loaded: {df['source'].iloc[0]} (rows={len(df)}, cols={len(df.columns)})")
-        except Exception as e:
-            logs.append(f"Error reading {getattr(uf, 'name', '?')}: {e}")
+                # Optional downsampling for responsiveness
+                if len(df) > max_points:
+                    step = max(1, len(df) // int(max_points))
+                    df_plot = df.iloc[::step].copy()
+                else:
+                    df_plot = df
 
-    if not frames:
-        st.error("No readable files.")
-        st.text_area("Logs", value="\n".join(logs), height=160)
-        return
+                # Plot
+                fig = _build_time_history_figure(df_plot, available)
+                st.plotly_chart(fig, use_container_width=True)
 
-    raw_master = pd.concat(frames, axis=0, ignore_index=True)
-    # Now that we have data, rebuild resample options
-    resample_options = _guess_resample_options(raw_master)
-    resample_choice_label = st.sidebar.selectbox(
-        "Resample period",
-        [x[0] for x in resample_options],
-        index=0,
-        key="resample_choice",
-    )
-    resample_rule = dict(resample_options)[resample_choice_label]
+                # Simple summary table per visible series
+                with st.expander("Summary (visible series)"):
+                    numeric_summary = df_plot[list(available.values())].describe().T.reset_index(names=["Series"])
+                    _download_csv_button("Download summary CSV", numeric_summary, f"{os.path.splitext(file.name)[0]}_summary.csv")
+                    st.dataframe(numeric_summary, use_container_width=True)
 
-    # Optional resampling
-    df_used = _resample_if_possible(raw_master, resample_rule) if resample_rule else raw_master
-
-    # Try to determine a reasonable group column
-    detected_group_col = _detect_position_col(df_used)
-    group_col = (st.sidebar.text_input("Detected Group Column", value=detected_group_col or "") or "").strip()
-    if not group_col and group_hint.strip():
-        group_col = group_hint.strip()
-    if group_col and group_col not in df_used.columns:
-        st.warning(f"Group column '{group_col}' not found. It will be ignored.")
-        group_col = ""
-
-    # Build spectra in tidy form
-    tidy_spec = spectra_to_rows(df_used)
-
-    tabs = st.tabs(["Summary", "Spectra", "Raw Data", "Logs"])
-
-    # Summary tab
-    with tabs[0]:
-        st.subheader("Summary")
-        group_cols: List[str] = []
-        if group_col:
-            group_cols.append(group_col)
-        if "source" in df_used.columns:
-            group_cols.append("source")
-
-        summary_df = _build_summary(df_used, group_cols)
-        if summary_df.empty:
-            st.info("No numeric data to summarize.")
-        else:
-            st.dataframe(summary_df, use_container_width=True, hide_index=True)
-            _download_csv_button("Download summary CSV", summary_df, "summary")
-
-    # Spectra tab
-    with tabs[1]:
-        st.subheader("Spectra")
-
-        # Allow user to filter a group (optional)
-        filters_cols = []
-        if group_col:
-            filters_cols.append(group_col)
-        if "source" in tidy_spec.columns:
-            filters_cols.append("source")
-
-        sub = tidy_spec.copy()
-        # Dynamic filters
-        if not sub.empty and filters_cols:
-            cols = st.columns(len(filters_cols))
-            for i, colname in enumerate(filters_cols):
-                with cols[i]:
-                    uniq = sorted([str(x) for x in sub[colname].dropna().unique()])
-                    if len(uniq) <= 1:
-                        continue
-                    selected = st.multiselect(f"Filter {colname}", options=uniq, default=uniq)
-                    sub = sub[sub[colname].astype(str).isin(selected)]
-
-        # Plot
-        if sub.empty:
-            st.info("No spectral data detected in the uploaded files.")
-        else:
-            fig = _plot_spectra(sub, color_by=(colour_by if colour_by in sub.columns else None))
-            if not show_markers:
-                for tr in fig.data:
-                    tr.mode = "lines"
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Download tidy spectra
-            _download_csv_button("Download tidy spectra CSV", sub, "spectra_tidy")
-
-    # Raw Data tab
-    with tabs[2]:
-        st.subheader("Raw Data")
-        if show_raw_preview:
-            st.dataframe(raw_master, use_container_width=True, hide_index=True)
-        else:
-            st.caption("Enable 'Show raw preview table' in the sidebar to render the full table.")
-        _download_csv_button("Download combined raw CSV", raw_master, "raw_combined")
-
-    # Logs tab
-    with tabs[3]:
-        st.subheader("Logs")
-        st.text_area("Ingestion log", value="\n".join(logs), height=240, label_visibility="collapsed")
+    # Placeholder for additional tools/sections (spectra, etc.) can go below.
+    # Existing/legacy time-history upload/plotting sections should be removed to avoid duplication.
 
 
 if __name__ == "__main__":
