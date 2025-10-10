@@ -166,10 +166,14 @@ with st.spinner("Processing Data...", show_time=True):
             summary_df = survey.resi_summary()
             leq_spec_df = getattr(survey, "typical_leq_spectra", lambda: None)()
             lmax_spec_df = getattr(survey, "lmax_spectra", lambda: None)()
+            render_sidebar_set_periods(survey)
+
         except Exception as err:
             summary_error = str(err)
     else:
         summary_error = "No valid logs loaded."
+
+
 
     # Helper list of “position” names (i.e. filenames)
     pos_list = list(logs.keys())
@@ -205,9 +209,6 @@ with st.spinner("Processing Data...", show_time=True):
 
     #Summary tab
     with ui_tabs[0]:
-
-        st.subheader("Set Periods")
-        render_sidebar_set_periods(survey)
 
         st.subheader("Broadband Summary")
         if summary_df is not None:
