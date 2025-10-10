@@ -310,3 +310,20 @@ if summary_tab is not None:
                 st.info("No Lmax spectra available. Load logs and compute the survey summary first.")
         except Exception as e:
             st.warning(f"Unable to display Lmax spectra table: {e}")
+        # ... existing content for resi_summary() and lmax_spectra() ...
+
+        st.subheader("Leq spectra")
+        try:
+            # Prefer a cached value if you already store it
+            leq_spec_df = st.session_state.get("leq_spec_df")
+            if leq_spec_df is None:
+                leq_spec_df = survey.leq_spectra()
+                # Cache for reuse elsewhere in the UI
+                st.session_state["leq_spec_df"] = leq_spec_df
+
+            if leq_spec_df is not None and hasattr(leq_spec_df, "empty") and not leq_spec_df.empty:
+                st.dataframe(leq_spec_df, use_container_width=True)
+            else:
+                st.info("No Leq spectra available to display.")
+        except Exception as e:
+            st.warning(f"Unable to display Leq spectra: {e}")
