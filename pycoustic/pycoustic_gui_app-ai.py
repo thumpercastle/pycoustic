@@ -36,6 +36,67 @@ if "apply_agg" not in st.session_state:
 if "period_last" not in st.session_state:
     st.session_state["period_last"] = ""
 
+# Python
+# --- helper: sidebar UI to set Survey periods ---
+import streamlit as st
+
+def render_sidebar_set_periods(survey):
+    # Defaults matching the example: day=07:00, evening=23:00, night=23:00
+    if "sp_times" not in st.session_state:
+        st.session_state["sp_times"] = {"day": (7, 0), "evening": (23, 0), "night": (23, 0)}
+
+    times = st.session_state["sp_times"]
+    day_h0, day_m0 = times["day"]
+    eve_h0, eve_m0 = times["evening"]
+    nig_h0, nig_m0 = times["night"]
+
+    st.sidebar.markdown("### Set periods")
+    st.sidebar.caption("Choose start times for Day, Evening, and Night. Set Evening equal to Night to disable it.")
+
+    hours = list(range(24))
+    minutes = list(range(60))
+
+    # Day
+    st.sidebar.write("Day start")
+    d_h = st.sidebar.selectbox("Hour (Day)", hours, index=day_h0, key="sp_day_h")
+    d_m = st.sidebar.selectbox("Minute (Day)", minutes, index=day_m0, key="sp_day_m")
+
+    # Evening
+    st.sidebar.write("Evening start")
+    e_h = st.sidebar.selectbox("Hour (Evening)", hours, index=eve_h0, key="sp_eve_h")
+    e_m = st.sidebar.selectbox("Minute (Evening)", minutes, index=eve_m0, key="sp_eve_m")
+
+    # Night
+    st.sidebar.write("Night start")
+    n_h = st.sidebar.selectbox("Hour (Night)", hours, index=nig_h0, key="sp_nig_h")
+    n_m = st.sidebar.selectbox("Minute (Night)", minutes, index=nig_m0, key="sp_nig_m")
+
+    # Validation: 'night' hour must be strictly after 'day' hour
+    valid = n_h > d_h
+    if not valid:
+        st.sidebar.error("Night hour must be strictly after Day hour.")
+
+    apply_clicked = st.sidebar.button("Apply periods", use_container_width=True, disabled=not valid)
+
+    # Persist current selections
+    st.session_state["sp_times"] = {
+        "day": (int(d_h), int(d_m)),
+        "evening": (int(e_h), int(e_m)),
+        "night": (int(n_h), int(n_m)),
+    }
+
+    if apply_clicked:
+        times = st.session_state["sp_times"]
+        try:
+            survey.set_periods(times=times)
+            st.sidebar.success(
+                f"Applied: Day {times['day'][0]:02d}:{times['day'][1]:02d}, "
+                f"Evening {times['evening'][0]:02d}:{times['evening'][1]:02d}, "
+                f"Night {times['night'][0]:02d}:{times['night'][1]:02d}"
+            )
+        except Exception as e:
+            st.sidebar.error(f"Failed to set periods: {e}")
+
 with st.sidebar:
     # File Upload in expander container
     with st.expander("File Upload", expanded=True):
@@ -72,6 +133,10 @@ with st.sidebar:
         apply_agg_btn = st.button("Apply Integration Period")
         if apply_agg_btn:
             st.session_state["apply_agg"] = True
+
+    with st.expander("Set Periods", expanded=True):
+        render_sidebar_set_periods(survey)
+
 #test
 # Main Window / Data Load
 with st.spinner("Processing Data...", show_time=True):
