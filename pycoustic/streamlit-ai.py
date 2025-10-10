@@ -311,8 +311,16 @@ def _download_csv_button(label: str, df: pd.DataFrame, file_name: str) -> None:
 
 # === New helpers for DateTimeIndex-based Log flow ===
 
-@st.cache_data(show_spinner=False)
-def _load_log_df_from_bytes(_file_bytes: bytes, file_suffix: str = ".csv", content_key: str | None = None) -> pd.DataFrame:
+@st.cache_data(
+    show_spinner=False,
+    # Ensure memoryview objects are safely hashable for the cache.
+    hash_funcs={memoryview: lambda v: v.tobytes()},
+)
+def _load_log_df_from_bytes(
+    _file_bytes: bytes | memoryview,
+    file_suffix: str = ".csv",
+    content_key: str | None = None,
+) -> pd.DataFrame:
     """
     Persist uploaded bytes to a temp file and create a Log to obtain a DataFrame.
     Requires Log().df to have a DateTimeIndex.
@@ -323,6 +331,10 @@ def _load_log_df_from_bytes(_file_bytes: bytes, file_suffix: str = ".csv", conte
     """
     # Keep content_key in the signature so it participates in the cache key.
     _ = content_key
+
+    # Coerce memoryview to bytes so file IO is consistent.
+    if isinstance(_file_bytes, memoryview):
+        _file_bytes = _file_bytes.tobytes()
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=file_suffix) as tmp:
         tmp.write(_file_bytes)
