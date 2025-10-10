@@ -73,53 +73,6 @@ with st.sidebar:
         if apply_agg_btn:
             st.session_state["apply_agg"] = True
 
-# --- Modal duration overrides (in minutes, optional) ---
-with st.expander("Modal durations (optional overrides)", expanded=False):
-    st.caption('Enter values like "60min" or "15min". Leave blank to use library defaults.')
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        modal_day_t = st.text_input("day_t", value="", placeholder="60min", key="modal_day_t")
-    with c2:
-        modal_evening_t = st.text_input("evening_t", value="", placeholder="120min", key="modal_evening_t")
-    with c3:
-        modal_night_t = st.text_input("night_t", value="", placeholder="180min", key="modal_night_t")
-
-def _is_valid_minutes(s: str) -> bool:
-    if not s:
-        return False
-    s_norm = s.strip().lower()
-    m = re.fullmatch(r"(\d+)\s*min", s_norm)
-    if not m:
-        return False
-    try:
-        return int(m.group(1)) > 0
-    except ValueError:
-        return False
-
-def _normalize_minutes(s: str) -> str:
-    # normalize to "<int>min" without spaces, lowercase
-    s_norm = s.strip().lower()
-    num = re.fullmatch(r"(\d+)\s*min", s_norm).group(1)
-    return f"{int(num)}min"
-
-# Build kwargs to pass only for valid, non-empty inputs
-modal_kwargs: dict = {}
-if modal_day_t.strip():
-    if _is_valid_minutes(modal_day_t):
-        modal_kwargs["day_t"] = _normalize_minutes(modal_day_t)
-    else:
-        st.warning('day_t must be in the format "<number>min", e.g., "60min".')
-if modal_evening_t.strip():
-    if _is_valid_minutes(modal_evening_t):
-        modal_kwargs["evening_t"] = _normalize_minutes(modal_evening_t)
-    else:
-        st.warning('evening_t must be in the format "<number>min", e.g., "120min".')
-if modal_night_t.strip():
-    if _is_valid_minutes(modal_night_t):
-        modal_kwargs["night_t"] = _normalize_minutes(modal_night_t)
-    else:
-        st.warning('night_t must be in the format "<number>min", e.g., "180min".')
-
 # Main Window / Data Load
 with st.spinner("Processing Data...", show_time=True):
     # Load each uploaded CSV into a pycoustic Log
@@ -378,6 +331,56 @@ if summary_tab is not None:
 
     # --- Modal table (similar to "Leq spectra") ---
         st.subheader("Modal")
+
+        # --- Modal duration overrides (in minutes, optional) ---
+        with st.expander("Modal durations (optional overrides)", expanded=False):
+            st.caption('Enter values like "60min" or "15min". Leave blank to use library defaults.')
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                modal_day_t = st.text_input("day_t", value="", placeholder="60min", key="modal_day_t")
+            with c2:
+                modal_evening_t = st.text_input("evening_t", value="", placeholder="120min", key="modal_evening_t")
+            with c3:
+                modal_night_t = st.text_input("night_t", value="", placeholder="180min", key="modal_night_t")
+
+
+        def _is_valid_minutes(s: str) -> bool:
+            if not s:
+                return False
+            s_norm = s.strip().lower()
+            m = re.fullmatch(r"(\d+)\s*min", s_norm)
+            if not m:
+                return False
+            try:
+                return int(m.group(1)) > 0
+            except ValueError:
+                return False
+
+
+        def _normalize_minutes(s: str) -> str:
+            # normalize to "<int>min" without spaces, lowercase
+            s_norm = s.strip().lower()
+            num = re.fullmatch(r"(\d+)\s*min", s_norm).group(1)
+            return f"{int(num)}min"
+
+
+        # Build kwargs to pass only for valid, non-empty inputs
+        modal_kwargs: dict = {}
+        if modal_day_t.strip():
+            if _is_valid_minutes(modal_day_t):
+                modal_kwargs["day_t"] = _normalize_minutes(modal_day_t)
+            else:
+                st.warning('day_t must be in the format "<number>min", e.g., "60min".')
+        if modal_evening_t.strip():
+            if _is_valid_minutes(modal_evening_t):
+                modal_kwargs["evening_t"] = _normalize_minutes(modal_evening_t)
+            else:
+                st.warning('evening_t must be in the format "<number>min", e.g., "120min".')
+        if modal_night_t.strip():
+            if _is_valid_minutes(modal_night_t):
+                modal_kwargs["night_t"] = _normalize_minutes(modal_night_t)
+            else:
+                st.warning('night_t must be in the format "<number>min", e.g., "180min".')
 
         if "modal_df" not in st.session_state:
             st.session_state.modal_df = None
