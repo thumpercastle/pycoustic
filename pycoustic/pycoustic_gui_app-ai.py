@@ -72,7 +72,7 @@ with st.sidebar:
         apply_agg_btn = st.button("Apply Integration Period")
         if apply_agg_btn:
             st.session_state["apply_agg"] = True
-
+#test
 # Main Window / Data Load
 with st.spinner("Processing Data...", show_time=True):
     # Load each uploaded CSV into a pycoustic Log
