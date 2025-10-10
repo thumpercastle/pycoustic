@@ -134,8 +134,6 @@ with st.sidebar:
         if apply_agg_btn:
             st.session_state["apply_agg"] = True
 
-    with st.expander("Set Periods", expanded=True):
-        render_sidebar_set_periods(survey)
 
 #test
 # Main Window / Data Load
@@ -207,6 +205,9 @@ with st.spinner("Processing Data...", show_time=True):
 
     #Summary tab
     with ui_tabs[0]:
+
+        st.subheader("Set Periods")
+        render_sidebar_set_periods(survey)
 
         st.subheader("Broadband Summary")
         if summary_df is not None:
