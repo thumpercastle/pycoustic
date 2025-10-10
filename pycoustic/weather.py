@@ -93,3 +93,4 @@ class WeatherHistory:
 
     def get_weather_history(self):
         return self._hist
+

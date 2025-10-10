@@ -6,6 +6,8 @@ import datetime as dt
 
 class Log:
     def __init__(self, path=""):
+        #TODO C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pycoustic\log.py:15: UserWarning:
+        #Parsing dates in %Y/%m/%d %H:%M format when dayfirst=True was specified. Pass `dayfirst=False` or specify a format to silence this warning.
         """
         The Log class is used to store the measured noise data from one data logger.
         The data must be entered in a .csv file with headings in the specific format "Leq A", "L90 125" etc.
@@ -340,6 +342,9 @@ class Log:
         self._antilogs.drop(labels="Night idx", axis=1, inplace=True)
         self._master = self._append_night_idx(data=self._master)
         self._antilogs = self._append_night_idx(data=self._antilogs)
+
+#C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pycoustic\log.py:339: PerformanceWarning:
+#dropping on a non-lexsorted multi-index without a level parameter may impact performance.
 
     def get_period_times(self):
         """

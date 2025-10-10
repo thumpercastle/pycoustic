@@ -10,7 +10,7 @@ pd.set_option('display.max_rows', None)
 
 #survey.leq_spectra() bug
 #TODO: C:\Users\tonyr\PycharmProjects\pycoustic\.venv1\Lib\site-packages\pycoustic\survey.py:287: FutureWarning: The behavior of pd.concat with len(keys) != len(objs) is deprecated. In a future version this will raise instead of truncating to the smaller of the two sequences combi = pd.concat(all_pos, axis=1, keys=["UA1", "UA2"])
-
+#TODO: Survey should make a deep copy of Log objects. Otherwise setting time periods messes it up for other instances.
 
 class Survey:
     """
@@ -200,6 +200,7 @@ class Survey:
         return combi
 
     def counts(self, cols=None, day_t="60min", evening_t="60min", night_t="15min"):
+        #TODO Need to order rows and rename from 'date'
         """
         Returns counts for each time period. For example, this can return the number of L90 occurrences at each decibel
         level for daytime and night-time periods.
@@ -327,3 +328,91 @@ class Survey:
             raise ValueError("No weather history available. Use Survey.weather() first.")
         return pd.DataFrame([self._weatherhist.min(), self._weatherhist.max(), self._weatherhist.mean()],
                             index=["Min", "Max", "Mean"]).drop(columns=["dt"]).round(decimals=1)
+
+
+# TODO: Fix this bug in weatherhist
+# survey.weather(api_key=r"eef3f749e018627b70c2ead1475a1a32", postcode="HA8")
+#                     dt   temp pressure humidity clouds wind_speed wind_deg  \
+# 0  2025-09-03 08:59:00  17.52      998       97     75       6.69      210
+# 1  2025-09-03 14:59:00  19.85      997       84     40       9.26      220
+# 2  2025-09-03 20:59:00  16.27   1003.0     90.0   20.0       4.63    240.0
+# 3  2025-09-04 02:59:00  14.59   1005.0     91.0   99.0       3.09    230.0
+# 4  2025-09-04 08:59:00  15.08     1004       93     40       4.12      200
+# 5  2025-09-04 14:59:00  18.73     1007       63     40       8.75      260
+# 6  2025-09-04 20:59:00  15.64   1013.0     76.0    0.0        3.6    270.0
+# 7  2025-09-05 02:59:00  11.42   1016.0     94.0    0.0       3.09    260.0
+# 8  2025-09-05 08:59:00  14.12   1020.0     89.0   20.0       3.09    270.0
+# 9  2025-09-05 14:59:00  22.16   1021.0     50.0    0.0       4.12    280.0
+# 10 2025-09-05 20:59:00  17.38   1023.0     75.0   75.0       3.09    220.0
+# 11 2025-09-06 02:59:00  14.37   1022.0     83.0   99.0       1.78    187.0
+# 12 2025-09-06 08:59:00  16.44   1020.0     73.0  100.0       3.48    138.0
+# 13 2025-09-06 14:59:00  23.21   1037.0     50.0    0.0       7.72    160.0
+# 14 2025-09-06 20:59:00   18.5   1035.0     75.0   93.0        3.6    120.0
+# 15 2025-09-07 02:59:00  16.06   1031.0     77.0   84.0       3.09    120.0
+# 16 2025-09-07 08:59:00  18.78   1029.0     77.0    0.0       4.63    110.0
+# 17 2025-09-07 14:59:00  23.82   1027.0     67.0   75.0       8.75    200.0
+# 18 2025-09-07 20:59:00  19.38   1031.0     76.0   72.0       4.63    200.0
+# 19 2025-09-08 02:59:00  14.49   1034.0     91.0    4.0       1.54    190.0
+# 20 2025-09-08 08:59:00  14.84   1037.0     85.0   20.0       4.12    240.0
+#             rain wind_gust   uvi
+# 0   {'1h': 0.25}       NaN   NaN
+# 1   {'1h': 1.27}     14.92   NaN
+# 2            NaN       NaN   NaN
+# 3            NaN       NaN   NaN
+# 4   {'1h': 1.27}       NaN   NaN
+# 5   {'3h': 0.13}       NaN   NaN
+# 6            NaN       NaN   NaN
+# 7            NaN       NaN   NaN
+# 8            NaN       NaN   NaN
+# 9            NaN       NaN   NaN
+# 10           NaN       NaN   NaN
+# 11           NaN      3.31   0.0
+# 12           NaN       7.4  0.86
+# 13           NaN       NaN  2.96
+# 14           NaN       NaN   0.0
+# 15           NaN       NaN   0.0
+# 16           NaN       NaN   1.1
+# 17           NaN       NaN  2.24
+# 18           NaN       NaN   0.0
+# 19           NaN       NaN   0.0
+# 20           NaN       NaN  1.12
+# survey.weather_summary()
+# Traceback (most recent call last):
+#   File "<input>", line 1, in <module>
+#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pycoustic\survey.py", line 328, in weather_summary
+#     return pd.DataFrame([self._weatherhist.min(), self._weatherhist.max(), self._weatherhist.mean()],
+#                          ^^^^^^^^^^^^^^^^^^^^^^^
+#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\frame.py", line 11643, in min
+#     result = super().min(axis, skipna, numeric_only, **kwargs)
+#              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\generic.py", line 12388, in min
+#     return self._stat_function(
+#            ^^^^^^^^^^^^^^^^^^^^
+#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\generic.py", line 12377, in _stat_function
+#     return self._reduce(
+#            ^^^^^^^^^^^^^
+#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\frame.py", line 11562, in _reduce
+#     res = df._mgr.reduce(blk_func)
+#           ^^^^^^^^^^^^^^^^^^^^^^^^
+#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\internals\managers.py", line 1500, in reduce
+#     nbs = blk.reduce(func)
+#           ^^^^^^^^^^^^^^^^
+#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\internals\blocks.py", line 404, in reduce
+#     result = func(self.values)
+#              ^^^^^^^^^^^^^^^^^
+#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\frame.py", line 11481, in blk_func
+#     return op(values, axis=axis, skipna=skipna, **kwds)
+#            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\nanops.py", line 147, in f
+#     result = alt(values, axis=axis, skipna=skipna, **kwds)
+#              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\nanops.py", line 404, in new_func
+#     result = func(values, axis=axis, skipna=skipna, mask=mask, **kwargs)
+#              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\nanops.py", line 1098, in reduction
+#     result = getattr(values, meth)(axis)
+#              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\numpy\_core\_methods.py", line 48, in _amin
+#     return umr_minimum(a, axis, None, out, keepdims, initial, where)
+#            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# TypeError: '<=' not supported between instances of 'dict' and 'dict'
