@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import hashlib
 
 from pycoustic import Log  # expects a Log class exposing a .df with a DateTimeIndex
 
@@ -311,13 +312,20 @@ def _download_csv_button(label: str, df: pd.DataFrame, file_name: str) -> None:
 # === New helpers for DateTimeIndex-based Log flow ===
 
 @st.cache_data(show_spinner=False)
-def _load_log_df_from_bytes(file_bytes: bytes, file_suffix: str = ".csv") -> pd.DataFrame:
+def _load_log_df_from_bytes(_file_bytes: bytes, file_suffix: str = ".csv", content_key: str | None = None) -> pd.DataFrame:
     """
     Persist uploaded bytes to a temp file and create a Log to obtain a DataFrame.
     Requires Log().df to have a DateTimeIndex.
+
+    _file_bytes is ignored by Streamlit's cache hasher (leading underscore).
+    Optionally pass content_key (e.g., a sha256 of the bytes) so the cache
+    invalidates when the content changes.
     """
+    # Keep content_key in the signature so it participates in the cache key.
+    _ = content_key
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=file_suffix) as tmp:
-        tmp.write(file_bytes)
+        tmp.write(_file_bytes)
         tmp_path = tmp.name
     try:
         log = Log(path=tmp_path)
@@ -401,7 +409,12 @@ def main() -> None:
 
                 # Load via Log() and enforce DateTimeIndex
                 try:
-                    df = _load_log_df_from_bytes(file.getbuffer(), file_suffix=".csv")
+                    # Suppose you have file_bytes or a memoryview named mv
+                    file_bytes = file.getbuffer()
+                    data = file_bytes if isinstance(file_bytes, (bytes, bytearray)) else file_bytes.tobytes()
+                    content_key = hashlib.sha256(data).hexdigest()
+
+                    df = _load_log_df_from_bytes(data, file_suffix=".csv", content_key=content_key)
                 except Exception as e:
                     st.error(f"Could not load Log() from file: {e}")
                     continue
