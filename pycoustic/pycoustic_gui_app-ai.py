@@ -330,7 +330,6 @@ if summary_tab is not None:
             st.warning(f"Unable to display Leq spectra: {e}")
 
     # --- Modal table (similar to "Leq spectra") ---
-        
 
         st.subheader("Modal")
 
@@ -352,11 +351,15 @@ if summary_tab is not None:
         if "modal_df" not in st.session_state:
             st.session_state.modal_df = None
 
+        def period_str(start_t: dt.time, end_t: dt.time) -> str:
+            # Format as "HH:MM-HH:MM" for the analysis function
+            return f"{start_t.strftime('%H:%M')}-{end_t.strftime('%H:%M')}"
+
         if survey is not None:
-            # Convert to "HH:MM" strings to pass to the analysis function
-            day_t = (day_start.strftime("%H:%M"), day_end.strftime("%H:%M"))
-            evening_t = (eve_start.strftime("%H:%M"), eve_end.strftime("%H:%M"))
-            night_t = (night_start.strftime("%H:%M"), night_end.strftime("%H:%M"))
+            day_t = period_str(day_start, day_end)
+            evening_t = period_str(eve_start, eve_end)
+            night_t = period_str(night_start, night_end)  # supports overnight like "23:00-07:00"
+
             try:
                 st.session_state.modal_df = survey.modal(day_t=day_t, evening_t=evening_t, night_t=night_t)
             except Exception as e:
