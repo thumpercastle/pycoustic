@@ -297,44 +297,99 @@ except Exception:
 if summary_tab is not None:
     with summary_tab:
         st.markdown("### Lmax Spectra")
-        # Allow user to change arguments
-        with st.expander("Lmax spectra options"):
-            # Load previous values if set; otherwise provide sensible defaults
-            defaults = st.session_state.get("lmax_args", {"n": 10, "t": "2min", "period": "days"})
-            c1, c2, c3 = st.columns(3)
+        # Lmax spectra controls and live update
+        if "lmax_kwargs" not in st.session_state:
+            st.session_state.lmax_kwargs = {"n": 10, "t": "2min", "period": "nights"}
 
-            n_val = c1.number_input("n (integer)", min_value=1, step=1, value=int(defaults["n"]))
-            t_val = c2.text_input('t (e.g., "2min")', value=str(defaults["t"]))
+        st.subheader("Lmax Spectra Parameters")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            n_val = st.number_input(
+                "Nth-highest (n)",
+                min_value=1,
+                step=1,
+                value=int(st.session_state.lmax_kwargs.get("n", 10)),
+                key="lmax_n_input",
+            )
+        with col2:
+            t_val = st.text_input(
+                "Aggregation period (t)",
+                value=st.session_state.lmax_kwargs.get("t", "2min"),
+                key="lmax_t_input",
+                help='Examples: "1min", "2min", "5min"',
+            )
+        with col3:
             period_options = ["days", "evenings", "nights"]
-            period_val = c3.selectbox(
-                "period",
+            default_period = st.session_state.lmax_kwargs.get("period", "nights")
+            try:
+                default_idx = period_options.index(default_period)
+            except ValueError:
+                default_idx = period_options.index("nights")
+            period_val = st.selectbox(
+                "Time window",
                 options=period_options,
-                index=period_options.index(defaults.get("period", "days")),
+                index=default_idx,
+                key="lmax_period_select",
             )
 
-            if st.button("Apply Lmax parameters", type="primary"):
-                st.session_state["lmax_args"] = {"n": int(n_val), "t": t_val, "period": period_val}
-                try:
-                    lmax_df = survey.lmax_spectra(n=int(n_val), t=t_val, period=period_val)
-                    st.session_state["lmax_spec_df"] = lmax_df
-                    st.success("Lmax spectra updated.")
-                except Exception as e:
-                    st.error(f"Error computing Lmax spectra: {e}")
+        # Update kwargs from UI
+        st.session_state.lmax_kwargs = {
+            "n": int(n_val),
+            "t": t_val.strip(),
+            "period": period_val,
+        }
 
+        # Compute and store df_lmax so changes reflect immediately in Streamlit Cloud
+        df_lmax = None
         try:
-            # Prefer a precomputed dataframe if your app already produces it
-            df_lmax = None
-            if "lmax_spec_df" in globals() and isinstance(lmax_spec_df, pd.DataFrame):
-                df_lmax = lmax_spec_df
-            elif "survey" in globals() and survey is not None:
-                df_lmax = survey.lmax_spectra()
-
-            if df_lmax is not None and not df_lmax.empty:
-                st.dataframe(df_lmax, use_container_width=True)
-            else:
-                st.info("No Lmax spectra available. Load logs and compute the survey summary first.")
+            df_lmax = survey.lmax_spectra(**st.session_state.lmax_kwargs)
+            st.session_state.df_lmax = df_lmax
+            st.success("Lmax spectra updated.")
         except Exception as e:
-            st.warning(f"Unable to display Lmax spectra table: {e}")
+            st.session_state.df_lmax = None
+            st.error(f"Failed to compute Lmax spectra: {e}")
+
+        # Display
+        if st.session_state.df_lmax is not None:
+            st.dataframe(st.session_state.df_lmax)
+
+        #     # Load previous values if set; otherwise provide sensible defaults
+        #     defaults = st.session_state.get("lmax_args", {"n": 10, "t": "2min", "period": "days"})
+        #     c1, c2, c3 = st.columns(3)
+        #
+        #     n_val = c1.number_input("n (integer)", min_value=1, step=1, value=int(defaults["n"]))
+        #     t_val = c2.text_input('t (e.g., "2min")', value=str(defaults["t"]))
+        #     period_options = ["days", "evenings", "nights"]
+        #     period_val = c3.selectbox(
+        #         "period",
+        #         options=period_options,
+        #         index=period_options.index(defaults.get("period", "days")),
+        #     )
+        #
+        #     if st.button("Apply Lmax parameters", type="primary"):
+        #         st.session_state["lmax_args"] = {"n": int(n_val), "t": t_val, "period": period_val}
+        #         try:
+        #             lmax_df = survey.lmax_spectra(n=int(n_val), t=t_val, period=period_val)
+        #             st.session_state["lmax_spec_df"] = lmax_df
+        #             st.success("Lmax spectra updated.")
+        #         except Exception as e:
+        #             st.error(f"Error computing Lmax spectra: {e}")
+        #
+        # try:
+        #     # Prefer a precomputed dataframe if your app already produces it
+        #     df_lmax = None
+        #     if "lmax_spec_df" in globals() and isinstance(lmax_spec_df, pd.DataFrame):
+        #         df_lmax = lmax_spec_df
+        #     elif "survey" in globals() and survey is not None:
+        #         df_lmax = survey.lmax_spectra()
+        #
+        #     if df_lmax is not None and not df_lmax.empty:
+        #         st.dataframe(df_lmax, use_container_width=True)
+        #     else:
+        #         st.info("No Lmax spectra available. Load logs and compute the survey summary first.")
+        # except Exception as e:
+        #     st.warning(f"Unable to display Lmax spectra table: {e}")
 
         # Leq spectra table
         st.subheader("Leq spectra")
