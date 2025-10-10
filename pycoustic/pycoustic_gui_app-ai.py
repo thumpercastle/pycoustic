@@ -23,7 +23,7 @@ st.set_page_config(page_title="Pycoustic Acoustic Survey Explorer", layout="wide
 
 # Graph colour palette config
 COLOURS = {
-    "Leq A": "#9e9e9e",   # light grey
+    "Leq A": "#FBAE18",   # light grey
     "L90 A": "#4d4d4d",   # dark grey
     "Lmax A": "#fc2c2c",  # red
 }
@@ -284,3 +284,29 @@ with st.spinner("Processing Data...", show_time=True):
             # --- Finally, display the TABLE with MultiIndex intact ---
             st.subheader(subheader)
             st.dataframe(df_used, hide_index=True)
+
+# Python
+# --- Summary tab: show Lmax spectra table ---
+# Assumes the first tab in `ui_tabs` is "Summary"
+try:
+    summary_tab = ui_tabs[0]
+except Exception:
+    summary_tab = None
+
+if summary_tab is not None:
+    with summary_tab:
+        st.markdown("### Lmax Spectra")
+        try:
+            # Prefer a precomputed dataframe if your app already produces it
+            df_lmax = None
+            if "lmax_spec_df" in globals() and isinstance(lmax_spec_df, pd.DataFrame):
+                df_lmax = lmax_spec_df
+            elif "survey" in globals() and survey is not None:
+                df_lmax = survey.lmax_spectra()
+
+            if df_lmax is not None and not df_lmax.empty:
+                st.dataframe(df_lmax, use_container_width=True)
+            else:
+                st.info("No Lmax spectra available. Load logs and compute the survey summary first.")
+        except Exception as e:
+            st.warning(f"Unable to display Lmax spectra table: {e}")
