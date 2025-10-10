@@ -15,7 +15,25 @@ import plotly.graph_objects as go
 import streamlit as st
 import hashlib
 
+# Ensure submodules are imported via the package path so their relative imports work.
+try:
+    from pycoustic.survey import *
+except Exception:
+    # Fallback for local runs
+    from survey import *
+
+try:
+    from pycoustic.log import *
+except Exception:
+    from log import *
+
 from pycoustic import Log  # expects a Log class exposing a .df with a DateTimeIndex
+
+# Support both package and script usage for the WeatherHistory import
+try:
+    from .weather import WeatherHistory
+except ImportError:
+    from weather import WeatherHistory
 
 # Plot styling
 COLOURS: List[str] = [

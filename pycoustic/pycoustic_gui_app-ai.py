@@ -6,8 +6,17 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from log import *
-from survey import *
+# Import from the package so relative imports inside submodules resolve
+try:
+    from pycoustic.survey import *
+except ImportError:
+    # Fallback for local runs
+    from survey import *
+
+try:
+    from pycoustic.log import *
+except ImportError:
+    from log import *
 
 # Streamlit app config
 st.set_page_config(page_title="Pycoustic Acoustic Survey Explorer", layout="wide")
