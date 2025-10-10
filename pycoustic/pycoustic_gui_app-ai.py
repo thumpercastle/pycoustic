@@ -137,25 +137,8 @@ with st.spinner("Processing Data...", show_time=True):
             blocks.append(sub)
         return pd.concat(blocks, ignore_index=True)
 
-    def _init_set_periods_state():
-        if "survey_set_periods_kwargs" not in st.session_state:
-            st.session_state["survey_set_periods_kwargs"] = {
-                "times": {"day": (7, 0), "evening": (23, 0), "night": (23, 0)}
-            }
-
-
-    def _mins(h: int, m: int) -> int:
-        return int(h) * 60 + int(m)
-
-
-    def render_set_periods_kwargs():
-        _init_set_periods_state()
-
     #Create tabs
     ui_tabs = st.tabs(["Summary"] + pos_list)
-
-    # Call this where you render other user-entered kwargs for Survey
-    render_set_periods_kwargs()
 
     #Summary tab
     with ui_tabs[0]:
@@ -304,89 +287,6 @@ with st.spinner("Processing Data...", show_time=True):
             st.subheader(subheader)
             st.dataframe(df_used, hide_index=True)
 
-# Python
-# --- UI: kwargs for Survey.set_periods(times=...) ---
-
-def _init_set_periods_state():
-    if "survey_set_periods_kwargs" not in st.session_state:
-        # Defaults (edit if you prefer different initial values)
-        st.session_state["survey_set_periods_kwargs"] = {
-            "times": {"day": (7, 0), "evening": (19, 0), "night": (23, 0)}
-        }
-
-
-def _mins(h: int, m: int) -> int:
-    return int(h) * 60 + int(m)
-
-
-def render_set_periods_kwargs():
-    _init_set_periods_state()
-
-    kw = st.session_state["survey_set_periods_kwargs"]
-    times = kw["times"]
-
-    st.markdown("#### Survey.set_periods kwargs")
-
-    # Read current values
-    d_h, d_m = map(int, times.get("day", (7, 0)))
-    e_h, e_m = map(int, times.get("evening", (19, 0)))
-    n_h, n_m = map(int, times.get("night", (23, 0)))
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.caption("Day start")
-        d_h = st.selectbox("Hour (Day)", options=list(range(24)), index=d_h, key="sp_day_h")
-        d_m = st.selectbox("Minute (Day)", options=list(range(60)), index=d_m, key="sp_day_m")
-
-    with c2:
-        st.caption("Evening start")
-        e_h = st.selectbox("Hour (Evening)", options=list(range(24)), index=e_h, key="sp_eve_h")
-        e_m = st.selectbox("Minute (Evening)", options=list(range(60)), index=e_m, key="sp_eve_m")
-
-    with c3:
-        st.caption("Night start")
-        n_h = st.selectbox("Hour (Night)", options=list(range(24)), index=n_h, key="sp_nig_h")
-        n_m = st.selectbox("Minute (Night)", options=list(range(60)), index=n_m, key="sp_nig_m")
-
-    # Persist any changes into session state
-    times = {"day": (int(d_h), int(d_m)), "evening": (int(e_h), int(e_m)), "night": (int(n_h), int(n_m))}
-    st.session_state["survey_set_periods_kwargs"]["times"] = times
-
-    st.caption("Tip: Set Evening equal to Night to disable the evening period.")
-
-    # Validate relationships
-    day_min = _mins(*times["day"])
-    eve_min = _mins(*times["evening"])
-    nig_min = _mins(*times["night"])
-
-    errors = []
-    # Night must cross over midnight: it should start later in the same day than Day.
-    if not (day_min < nig_min):
-        errors.append("Night must start after Day so that it crosses midnight.")
-
-    # Evening must be between Day and Night, unless disabled (equal to Night)
-    if eve_min != nig_min and not (day_min < eve_min < nig_min):
-        errors.append("Evening must be between Day and Night, or exactly equal to Night to disable it.")
-
-    if errors:
-        for err in errors:
-            st.error(err)
-
-    # Apply button similar to other kwargs sections
-    apply_col, _ = st.columns([1, 3])
-    with apply_col:
-        if st.button("Apply set_periods", disabled=bool(errors), use_container_width=True):
-            try:
-                # Uses the existing `survey` instance created earlier in this file
-                survey.set_periods(times=st.session_state["survey_set_periods_kwargs"]["times"])
-                st.success(
-                    f"Applied periods — Day {times['day'][0]:02d}:{times['day'][1]:02d}, "
-                    f"Evening {times['evening'][0]:02d}:{times['evening'][1]:02d}, "
-                    f"Night {times['night'][0]:02d}:{times['night'][1]:02d}"
-                )
-            except Exception as e:
-                st.error(f"Failed to apply set_periods: {e}")
 
 
 # --- Summary tab: show Lmax spectra table ---
