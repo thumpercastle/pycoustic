@@ -3,6 +3,7 @@ import tempfile
 from typing import List, Dict
 
 import pandas as pd
+import datetime as dt
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -329,14 +330,35 @@ if summary_tab is not None:
             st.warning(f"Unable to display Leq spectra: {e}")
 
     # --- Modal table (similar to "Leq spectra") ---
+        
+
         st.subheader("Modal")
+
+        # User-adjustable period boundaries
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        with c1:
+            day_start = st.time_input("Day start", value=dt.time(7, 0), key="modal_day_start")
+        with c2:
+            day_end = st.time_input("Day end", value=dt.time(19, 0), key="modal_day_end")
+        with c3:
+            eve_start = st.time_input("Evening start", value=dt.time(19, 0), key="modal_eve_start")
+        with c4:
+            eve_end = st.time_input("Evening end", value=dt.time(23, 0), key="modal_eve_end")
+        with c5:
+            night_start = st.time_input("Night start", value=dt.time(23, 0), key="modal_night_start")
+        with c6:
+            night_end = st.time_input("Night end", value=dt.time(7, 0), key="modal_night_end")
 
         if "modal_df" not in st.session_state:
             st.session_state.modal_df = None
 
         if survey is not None:
+            # Convert to "HH:MM" strings to pass to the analysis function
+            day_t = (day_start.strftime("%H:%M"), day_end.strftime("%H:%M"))
+            evening_t = (eve_start.strftime("%H:%M"), eve_end.strftime("%H:%M"))
+            night_t = (night_start.strftime("%H:%M"), night_end.strftime("%H:%M"))
             try:
-                st.session_state.modal_df = survey.modal()
+                st.session_state.modal_df = survey.modal(day_t=day_t, evening_t=evening_t, night_t=night_t)
             except Exception as e:
                 st.session_state.modal_df = None
                 st.warning(f"Could not compute modal results: {e}")
