@@ -247,6 +247,7 @@ with st.spinner("Processing Data...", show_time=True):
     if logs:
         try:
             survey = Survey()
+            st.session_state["survey"] = survey
             if callable(getattr(survey, "add_log", None)):
                 for name, lg in logs.items():
                     survey.add_log(lg, name=name)
@@ -302,7 +303,10 @@ with st.spinner("Processing Data...", show_time=True):
 
         st.subheader("Broadband Summary")
 
-        render_resi_summary(st.session_state.get("survey"))
+        survey = st.session_state.get("survey")
+        if survey is None:
+            st.warning("Survey not found in session_state['survey']. Ensure you set it after loading.")
+        render_resi_summary(survey)
 
         if summary_df is not None:
             st.dataframe(summary_df)
