@@ -568,7 +568,10 @@ files = [
 ]
 
 [package.dependencies]
-numpy = {version = ">=1.26.0", markers = "python_version >= \"3.12\""}
+numpy = [
+    {version = ">=1.23.2", markers = "python_version == \"3.11\""},
+    {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
+]
 python-dateutil = ">=2.8.2"
 pytz = ">=2020.1"
 tzdata = ">=2022.7"
@@ -1248,5 +1251,5 @@ watchmedo = ["PyYAML (>=3.10)"]
 
 [metadata]
 lock-version = "2.1"
-python-versions = ">=3.12.9, <4.0"
-content-hash = "93216c54f5d355fa9281e3cb3f0b5296d07bfae0fe2511d03e42e2b4ef3a640f"
+python-versions = ">=3.11.9, <4.0"
+content-hash = "9c4a6b2e4dccb0feb54037ce8786fff924a4f4ff35036edc5d8b6dadaf89f345"
