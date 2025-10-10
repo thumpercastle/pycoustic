@@ -310,8 +310,8 @@ if summary_tab is not None:
                 st.info("No Lmax spectra available. Load logs and compute the survey summary first.")
         except Exception as e:
             st.warning(f"Unable to display Lmax spectra table: {e}")
-        # ... existing content for resi_summary() and lmax_spectra() ...
 
+        # Leq spectra table
         st.subheader("Leq spectra")
         try:
             # Prefer a cached value if you already store it
@@ -327,3 +327,21 @@ if summary_tab is not None:
                 st.info("No Leq spectra available to display.")
         except Exception as e:
             st.warning(f"Unable to display Leq spectra: {e}")
+
+    # --- Modal table (similar to "Leq spectra") ---
+        st.subheader("Modal")
+
+        if "modal_df" not in st.session_state:
+            st.session_state.modal_df = None
+
+        if survey is not None:
+            try:
+                st.session_state.modal_df = survey.modal()
+            except Exception as e:
+                st.session_state.modal_df = None
+                st.warning(f"Could not compute modal results: {e}")
+
+        if st.session_state.modal_df is not None:
+            st.dataframe(st.session_state.modal_df, use_container_width=True)
+        else:
+            st.info("No modal results to display.")
