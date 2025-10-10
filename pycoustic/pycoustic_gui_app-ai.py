@@ -38,8 +38,6 @@ if "period_last" not in st.session_state:
 
 # Python
 # --- helper: sidebar UI to set Survey periods ---
-import streamlit as st
-
 def render_sidebar_set_periods(survey):
     # Defaults matching the example: day=07:00, evening=23:00, night=23:00
     if "sp_times" not in st.session_state:
@@ -96,6 +94,98 @@ def render_sidebar_set_periods(survey):
             )
         except Exception as e:
             st.sidebar.error(f"Failed to set periods: {e}")
+
+# Python
+def render_resi_summary(survey):
+    """
+    Render the Residential Summary (survey.resi_summary) in the Streamlit GUI.
+    Includes options for lmax_n, lmax_t and optional advanced inputs for leq_cols/max_cols.
+    """
+    import ast
+    import streamlit as st
+
+    st.header("Broadband Summary")
+
+    if survey is None:
+        st.info("No survey loaded.")
+        return
+
+    with st.expander("Options", expanded=False):
+        lmax_n = st.number_input("Nth-highest Lmax (lmax_n)", min_value=1, max_value=1000, value=10, step=1)
+        lmax_t_choice = st.selectbox(
+            "Lmax time basis (lmax_t)",
+            options=["2min", "1min", "5min", "15min", "60min", "custom"],
+            index=0,
+            help="Select the time aggregation used to compute Lmax rankings."
+        )
+        if lmax_t_choice == "custom":
+            lmax_t = st.text_input("Custom time basis (e.g., '30s', '10min')", value="2min")
+        else:
+            lmax_t = lmax_t_choice
+
+        advanced = st.checkbox("Advanced column selection (leq_cols, max_cols)")
+        leq_cols = None
+        max_cols = None
+
+        if advanced:
+            st.caption("Provide lists of tuples. Example: [(\"Leq\",\"A\"), (\"L90\",\"125\")]")
+            leq_text = st.text_input("leq_cols", value="")
+            max_text = st.text_input("max_cols", value="")
+            parse_errors = []
+
+            def _parse_tuple_list(s):
+                if not s.strip():
+                    return None
+                try:
+                    val = ast.literal_eval(s)
+                    if not isinstance(val, (list, tuple)):
+                        raise ValueError("Expected a list/tuple of tuples")
+                    # Coerce to list of tuples
+                    parsed = []
+                    for item in val:
+                        if not isinstance(item, (list, tuple)) or len(item) != 2:
+                            raise ValueError("Each entry must be a 2-tuple like (name, subname)")
+                        parsed.append((str(item[0]), str(item[1])))
+                    return parsed
+                except Exception as e:
+                    parse_errors.append(str(e))
+                    return None
+
+            leq_cols = _parse_tuple_list(leq_text)
+            max_cols = _parse_tuple_list(max_text)
+
+            if parse_errors:
+                st.warning("There were issues parsing advanced inputs: " + "; ".join(parse_errors))
+
+    run = st.button("Compute residential summary", use_container_width=True)
+
+    if run:
+        try:
+            with st.spinner("Computing summary..."):
+                df = survey.resi_summary(
+                    leq_cols=leq_cols,
+                    max_cols=max_cols,
+                    lmax_n=int(lmax_n),
+                    lmax_t=str(lmax_t),
+                )
+
+            if df is None:
+                st.info("No data returned.")
+                return
+
+            st.success(f"Summary computed. Rows: {getattr(df, 'shape', ['?','?'])[0]}, Columns: {getattr(df, 'shape', ['?','?'])[1]}")
+            st.dataframe(df, use_container_width=True, height=480)
+
+            csv_bytes = df.to_csv(index=True).encode("utf-8")
+            st.download_button(
+                label="Download CSV",
+                data=csv_bytes,
+                file_name="resi_summary.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+        except Exception as e:
+            st.error(f"Failed to compute residential summary: {e}")
 
 with st.sidebar:
     # File Upload in expander container
@@ -211,6 +301,9 @@ with st.spinner("Processing Data...", show_time=True):
     with ui_tabs[0]:
 
         st.subheader("Broadband Summary")
+
+        render_resi_summary()
+
         if summary_df is not None:
             st.dataframe(summary_df)
         else:
