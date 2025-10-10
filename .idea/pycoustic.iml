@@ -5,6 +5,7 @@
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
       <excludeFolder url="file://$MODULE_DIR$/.venv1" />
       <excludeFolder url="file://$MODULE_DIR$/.venv2" />
+      <excludeFolder url="file://$MODULE_DIR$/.venv3" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.12 (pycoustic) (2)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
