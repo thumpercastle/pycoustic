@@ -302,7 +302,7 @@ with st.spinner("Processing Data...", show_time=True):
 
         st.subheader("Broadband Summary")
 
-        render_resi_summary()
+        render_resi_summary(st.session_state.get("survey"))
 
         if summary_df is not None:
             st.dataframe(summary_df)
