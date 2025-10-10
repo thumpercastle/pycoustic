@@ -37,63 +37,142 @@ if "period_last" not in st.session_state:
     st.session_state["period_last"] = ""
 
 # Python
-# --- helper: sidebar UI to set Survey periods ---
-def render_sidebar_set_periods(survey):
-    # Defaults matching the example: day=07:00, evening=23:00, night=23:00
-    if "sp_times" not in st.session_state:
-        st.session_state["sp_times"] = {"day": (7, 0), "evening": (23, 0), "night": (23, 0)}
+import datetime as _dt
+import streamlit as st
 
-    times = st.session_state["sp_times"]
-    day_h0, day_m0 = times["day"]
-    eve_h0, eve_m0 = times["evening"]
-    nig_h0, nig_m0 = times["night"]
+def _set_periods_on_survey(survey, day_start, eve_start, night_start):
+    """
+    Try to set periods on the Survey object in a way that's compatible with your Survey/Log API.
+    Accepts HH:MM strings for day/evening/night starts.
+    """
+    if survey is None:
+        return
 
-    st.sidebar.markdown("### Set periods")
-    st.sidebar.caption("Choose start times for Day, Evening, and Night. Set Evening equal to Night to disable it.")
-
-    hours = list(range(24))
-    minutes = list(range(60))
-
-    # Day
-    st.sidebar.write("Day start")
-    d_h = st.sidebar.selectbox("Hour (Day)", hours, index=day_h0, key="sp_day_h")
-    d_m = st.sidebar.selectbox("Minute (Day)", minutes, index=day_m0, key="sp_day_m")
-
-    # Evening
-    st.sidebar.write("Evening start")
-    e_h = st.sidebar.selectbox("Hour (Evening)", hours, index=eve_h0, key="sp_eve_h")
-    e_m = st.sidebar.selectbox("Minute (Evening)", minutes, index=eve_m0, key="sp_eve_m")
-
-    # Night
-    st.sidebar.write("Night start")
-    n_h = st.sidebar.selectbox("Hour (Night)", hours, index=nig_h0, key="sp_nig_h")
-    n_m = st.sidebar.selectbox("Minute (Night)", minutes, index=nig_m0, key="sp_nig_m")
-
-    # Validation: 'night' hour must be strictly after 'day' hour
-    valid = n_h > d_h
-    if not valid:
-        st.sidebar.error("Night hour must be strictly after Day hour.")
-
-    apply_clicked = st.sidebar.button("Apply periods", use_container_width=True, disabled=not valid)
-
-    # Persist current selections
-    st.session_state["sp_times"] = {
-        "day": (int(d_h), int(d_m)),
-        "evening": (int(e_h), int(e_m)),
-        "night": (int(n_h), int(n_m)),
-    }
-
-    if apply_clicked:
-        times = st.session_state["sp_times"]
+    # Prefer a Survey-level setter if available
+    if hasattr(survey, "set_periods") and callable(getattr(survey, "set_periods")):
         try:
-            survey.set_periods(times=times)
-            st.sidebar.success(
-                f"Applied: Day {times['day'][0]:02d}:{times['day'][1]:02d}, "
-                f"Evening {times['evening'][0]:02d}:{times['evening'][1]:02d}, "
-                f"Night {times['night'][0]:02d}:{times['night'][1]:02d}"
-            )
+            survey.set_periods(day_start=day_start, eve_start=eve_start, night_start=night_start)
+            return
         except Exception as e:
-            st.sidebar.error(f"Failed to set periods: {e}")
+            st.sidebar.warning(f"set_periods failed on Survey: {e}")
+
+    # Next, try a Survey-level set_period_times
+    if hasattr(survey, "set_period_times") and callable(getattr(survey, "set_period_times")):
+        try:
+            survey.set_period_times(day_start, eve_start, night_start)
+            return
+        except Exception as e:
+            st.sidebar.warning(f"set_period_times failed on Survey: {e}")
+
+    # Fallback: set on each Log if available
+    try:
+        logs = getattr(survey, "_logs", None)
+        if isinstance(logs, dict):
+            for _k, log in logs.items():
+                if hasattr(log, "set_period_times") and callable(getattr(log, "set_period_times")):
+                    log.set_period_times(day_start, eve_start, night_start)
+        else:
+            st.sidebar.info("Survey logs not accessible; cannot set periods per-log.")
+    except Exception as e:
+        st.sidebar.error(f"Unable to apply periods to logs: {e}")
+
+
+def render_sidebar_set_periods():
+    """
+    Sidebar UI to choose Day/Evening/Night boundaries.
+    Applies changes to the Survey stored in st.session_state['survey'] so that
+    render_resi_summary uses the updated periods.
+    """
+    st.sidebar.subheader("Assessment Periods")
+
+    # Defaults commonly used: Day 07:00–19:00, Evening 19:00–23:00, Night 23:00–07:00
+    default_day = _dt.time(7, 0)
+    default_eve = _dt.time(19, 0)
+    default_night = _dt.time(23, 0)
+
+    # Use session defaults if already selected earlier
+    day_t = st.sidebar.time_input("Day starts", value=st.session_state.get("periods_day", default_day), step=300)
+    eve_t = st.sidebar.time_input("Evening starts", value=st.session_state.get("periods_eve", default_eve), step=300)
+    night_t = st.sidebar.time_input("Night starts", value=st.session_state.get("periods_night", default_night), step=300)
+
+    # Persist chosen values in session state
+    st.session_state["periods_day"] = day_t
+    st.session_state["periods_eve"] = eve_t
+    st.session_state["periods_night"] = night_t
+
+    # Also apply immediately to the current Survey instance (if present)
+    survey = st.session_state.get("survey")
+    if survey is not None:
+        # Convert time objects to "HH:MM" strings (commonly accepted by survey APIs)
+        day_s = f"{day_t.hour:02d}:{day_t.minute:02d}"
+        eve_s = f"{eve_t.hour:02d}:{eve_t.minute:02d}"
+        night_s = f"{night_t.hour:02d}:{night_t.minute:02d}"
+
+        _set_periods_on_survey(survey, day_s, eve_s, night_s)
+        # Store back (not strictly necessary if mutated in-place, but keeps things explicit)
+        st.session_state["survey"] = survey
+
+        st.sidebar.caption(f"Applied periods: Day {day_s}, Eve {eve_s}, Night {night_s}")
+    else:
+        st.sidebar.info("Load a survey to apply period changes.")
+
+# --- helper: sidebar UI to set Survey periods ---
+# def render_sidebar_set_periods(survey):
+#     # Defaults matching the example: day=07:00, evening=23:00, night=23:00
+#     if "sp_times" not in st.session_state:
+#         st.session_state["sp_times"] = {"day": (7, 0), "evening": (23, 0), "night": (23, 0)}
+#
+#     times = st.session_state["sp_times"]
+#     day_h0, day_m0 = times["day"]
+#     eve_h0, eve_m0 = times["evening"]
+#     nig_h0, nig_m0 = times["night"]
+#
+#     st.sidebar.markdown("### Set periods")
+#     st.sidebar.caption("Choose start times for Day, Evening, and Night. Set Evening equal to Night to disable it.")
+#
+#     hours = list(range(24))
+#     minutes = list(range(60))
+#
+#     # Day
+#     st.sidebar.write("Day start")
+#     d_h = st.sidebar.selectbox("Hour (Day)", hours, index=day_h0, key="sp_day_h")
+#     d_m = st.sidebar.selectbox("Minute (Day)", minutes, index=day_m0, key="sp_day_m")
+#
+#     # Evening
+#     st.sidebar.write("Evening start")
+#     e_h = st.sidebar.selectbox("Hour (Evening)", hours, index=eve_h0, key="sp_eve_h")
+#     e_m = st.sidebar.selectbox("Minute (Evening)", minutes, index=eve_m0, key="sp_eve_m")
+#
+#     # Night
+#     st.sidebar.write("Night start")
+#     n_h = st.sidebar.selectbox("Hour (Night)", hours, index=nig_h0, key="sp_nig_h")
+#     n_m = st.sidebar.selectbox("Minute (Night)", minutes, index=nig_m0, key="sp_nig_m")
+#
+#     # Validation: 'night' hour must be strictly after 'day' hour
+#     valid = n_h > d_h
+#     if not valid:
+#         st.sidebar.error("Night hour must be strictly after Day hour.")
+#
+#     apply_clicked = st.sidebar.button("Apply periods", use_container_width=True, disabled=not valid)
+#
+#     # Persist current selections
+#     st.session_state["sp_times"] = {
+#         "day": (int(d_h), int(d_m)),
+#         "evening": (int(e_h), int(e_m)),
+#         "night": (int(n_h), int(n_m)),
+#     }
+#
+#     if apply_clicked:
+#         times = st.session_state["sp_times"]
+#         try:
+#             survey.set_periods(times=times)
+#             st.sidebar.success(
+#                 f"Applied: Day {times['day'][0]:02d}:{times['day'][1]:02d}, "
+#                 f"Evening {times['evening'][0]:02d}:{times['evening'][1]:02d}, "
+#                 f"Night {times['night'][0]:02d}:{times['night'][1]:02d}"
+#             )
+#         except Exception as e:
+#             st.sidebar.error(f"Failed to set periods: {e}")
 
 # Python
 def render_resi_summary(survey):
@@ -257,7 +336,7 @@ with st.spinner("Processing Data...", show_time=True):
             summary_df = survey.resi_summary()
             leq_spec_df = getattr(survey, "typical_leq_spectra", lambda: None)()
             lmax_spec_df = getattr(survey, "lmax_spectra", lambda: None)()
-            render_sidebar_set_periods(survey)
+            render_sidebar_set_periods()
 
         except Exception as err:
             summary_error = str(err)
