@@ -137,11 +137,102 @@ with st.spinner("Processing Data...", show_time=True):
             blocks.append(sub)
         return pd.concat(blocks, ignore_index=True)
 
+    def _init_set_periods_state():
+        if "survey_set_periods_kwargs" not in st.session_state:
+            st.session_state["survey_set_periods_kwargs"] = {
+                "times": {"day": (7, 0), "evening": (23, 0), "night": (23, 0)}
+            }
+
+
+    def _mins(h: int, m: int) -> int:
+        return int(h) * 60 + int(m)
+
+
+    def render_set_periods_kwargs():
+        _init_set_periods_state()
+
     #Create tabs
     ui_tabs = st.tabs(["Summary"] + pos_list)
 
     #Summary tab
     with ui_tabs[0]:
+
+# Python
+# --- UI: kwargs for Survey.set_periods(times=...) ---
+
+# Assumes `st` is available in this file and `survey` is instantiated around line 96.
+
+
+
+        kw = st.session_state["survey_set_periods_kwargs"]
+        times = kw["times"]
+
+        st.markdown("#### Survey.set_periods kwargs")
+
+        # Defaults from session state
+        d_h, d_m = times["day"]
+        e_h, e_m = times["evening"]
+        n_h, n_m = times["night"]
+
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            st.caption("Day start")
+            d_h = st.selectbox("Hour", options=list(range(24)), index=int(d_h), key="sp_day_h")
+            d_m = st.selectbox("Minute", options=list(range(60)), index=int(d_m), key="sp_day_m")
+
+        with c2:
+            st.caption("Evening start")
+            e_h = st.selectbox("Hour ", options=list(range(24)), index=int(e_h), key="sp_eve_h")
+            e_m = st.selectbox("Minute ", options=list(range(60)), index=int(e_m), key="sp_eve_m")
+
+        with c3:
+            st.caption("Night start")
+            n_h = st.selectbox("Hour  ", options=list(range(24)), index=int(n_h), key="sp_nig_h")
+            n_m = st.selectbox("Minute  ", options=list(range(60)), index=int(n_m), key="sp_nig_m")
+
+        # Persist any changes into session state
+        times = {"day": (int(d_h), int(d_m)), "evening": (int(e_h), int(e_m)), "night": (int(n_h), int(n_m))}
+        st.session_state["survey_set_periods_kwargs"]["times"] = times
+
+        st.caption("Notes: Set evening equal to night to disable evening. Night-time must cross over midnight.")
+
+        # Validate relationships
+        day_min = _mins(*times["day"])
+        eve_min = _mins(*times["evening"])
+        nig_min = _mins(*times["night"])
+
+        errors = []
+        # Night must start later in the same day than day start (so it crosses midnight when wrapping to next day)
+        if not (day_min < nig_min):
+            errors.append("Night-time must cross over midnight, so its start must be later in the day than the day start.")
+        # Evening must be between day and night, unless disabled (equal to night)
+        if eve_min != nig_min and not (day_min < eve_min < nig_min):
+            errors.append("Evening must be between Day and Night, or exactly equal to Night to disable it.")
+
+        if errors:
+            for err in errors:
+                st.error(err)
+
+        # Apply button similar to other kwargs sections
+        apply_col, _ = st.columns([1, 3])
+        with apply_col:
+            if st.button("Apply set_periods", disabled=bool(errors), use_container_width=True):
+                try:
+                    # Send kwargs directly to the survey object
+                    survey.set_periods(times=st.session_state["survey_set_periods_kwargs"]["times"])
+                    st.success(
+                        f"Applied: Day {times['day'][0]:02d}:{times['day'][1]:02d}, "
+                        f"Evening {times['evening'][0]:02d}:{times['evening'][1]:02d}, "
+                        f"Night {times['night'][0]:02d}:{times['night'][1]:02d}"
+                    )
+                except Exception as e:
+                    st.error(f"Failed to apply set_periods: {e}")
+
+
+    # Call this renderer where you show other user-entered kwargs for Survey
+        render_set_periods_kwargs()
+
         st.subheader("Broadband Summary")
         if summary_df is not None:
             st.dataframe(summary_df)
@@ -301,7 +392,7 @@ if summary_tab is not None:
         if "lmax_kwargs" not in st.session_state:
             st.session_state.lmax_kwargs = {"n": 10, "t": "2min", "period": "nights"}
 
-        st.subheader("Lmax Spectra Parameters")
+        st.markdown("##Lmax Spectra Parameters")
 
         col1, col2, col3 = st.columns(3)
         with col1:
