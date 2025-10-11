@@ -105,48 +105,51 @@ class Survey:
             leq_cols = [("Leq", "A")]
         if max_cols is None:
             max_cols = [("Lmax", "A")]
-        for key in self._logs.keys():
-            lg = self._logs[key]
+
+        for key, lg in self._logs.items():  # changed: iterate items() to get lg directly
             combined_list = []
+            headers_for_log = []  # new: collect headers per log
+
             # Day
             days = lg._leq_by_date(lg._get_period(data=lg.get_antilogs(), period="days"), cols=leq_cols)
             days.sort_index(inplace=True)
             combined_list.append(days)
-            period_headers = ["Daytime" for i in range(len(leq_cols))]
+            headers_for_log.extend(["Daytime"] * len(leq_cols))  # changed: don't reset global headers
+
             # Evening
             if lg.is_evening():
                 evenings = lg._leq_by_date(lg._get_period(data=lg.get_antilogs(), period="evenings"), cols=leq_cols)
                 evenings.sort_index(inplace=True)
                 combined_list.append(evenings)
-                for i in range(len(leq_cols)):
-                    period_headers.append("Evening")
+                headers_for_log.extend(["Evening"] * len(leq_cols))
+
             # Night Leq
             nights = lg._leq_by_date(lg._get_period(data=lg.get_antilogs(), period="nights"), cols=leq_cols)
             nights.sort_index(inplace=True)
             combined_list.append(nights)
-            for i in range(len(leq_cols)):
-                period_headers.append("Night-time")
+            headers_for_log.extend(["Night-time"] * len(leq_cols))
+
             # Night max
             maxes = lg.as_interval(t=lmax_t)
             maxes = lg._get_period(data=maxes, period="nights", night_idx=True)
             maxes = lg.get_nth_high_low(n=lmax_n, data=maxes)[max_cols]
             maxes.sort_index(inplace=True)
-            #  +++
-            # SS Feb2025  - Code changed to prevent exception
-            #maxes.index = maxes.index.date
             try:
                 maxes.index = pd.to_datetime(maxes.index)
                 maxes.index = maxes.index.date
             except Exception as e:
                 print(f"Error converting index to date: {e}")
-            # SSS ---
             maxes.index.name = None
             combined_list.append(maxes)
-            for i in range(len(max_cols)):
-                period_headers.append("Night-time")
+            headers_for_log.extend(["Night-time"] * len(max_cols))
+
             summary = pd.concat(objs=combined_list, axis=1)
             summary = self._insert_multiindex(df=summary, super=key)
             combi = pd.concat(objs=[combi, summary], axis=0)
+
+            # append this log's headers to the global list
+            period_headers.extend(headers_for_log)
+
         combi = self._insert_header(df=combi, new_head_list=period_headers, header_idx=0)
         return combi
 
