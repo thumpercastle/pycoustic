@@ -1,9 +1,11 @@
 import os
+import ast
 import tempfile
 from typing import List, Dict
 
 import pandas as pd
 import plotly.graph_objects as go
+import datetime as _dt
 import streamlit as st
 import re
 
@@ -37,8 +39,7 @@ if "period_last" not in st.session_state:
     st.session_state["period_last"] = ""
 
 # Python
-import datetime as _dt
-import streamlit as st
+
 
 def _set_periods_on_survey(survey, day_start, eve_start, night_start):
     """
@@ -51,26 +52,26 @@ def _set_periods_on_survey(survey, day_start, eve_start, night_start):
     # Prefer a Survey-level setter if available
     if hasattr(survey, "set_periods") and callable(getattr(survey, "set_periods")):
         try:
-            survey.set_periods(day_start=day_start, eve_start=eve_start, night_start=night_start)
+            survey.set_periods(times={"day": day_start, "evening": eve_start, "night": night_start})
             return
         except Exception as e:
             st.sidebar.warning(f"set_periods failed on Survey: {e}")
 
     # Next, try a Survey-level set_period_times
-    if hasattr(survey, "set_period_times") and callable(getattr(survey, "set_period_times")):
+    if hasattr(survey, "set_periods") and callable(getattr(survey, "set_periods")):
         try:
-            survey.set_period_times(day_start, eve_start, night_start)
+            survey.set_periods(times={"day": day_start, "evening": eve_start, "night": night_start})
             return
         except Exception as e:
-            st.sidebar.warning(f"set_period_times failed on Survey: {e}")
+            st.sidebar.warning(f"set_periods failed on Survey: {e}")
 
     # Fallback: set on each Log if available
     try:
         logs = getattr(survey, "_logs", None)
         if isinstance(logs, dict):
             for _k, log in logs.items():
-                if hasattr(log, "set_period_times") and callable(getattr(log, "set_period_times")):
-                    log.set_period_times(day_start, eve_start, night_start)
+                if hasattr(log, "set_periods") and callable(getattr(log, "set_periods")):
+                    log.set_periods(times={"day": day_start, "evening": eve_start, "night": night_start})
         else:
             st.sidebar.info("Survey logs not accessible; cannot set periods per-log.")
     except Exception as e:
@@ -180,8 +181,7 @@ def render_resi_summary(survey):
     Render the Residential Summary (survey.resi_summary) in the Streamlit GUI.
     Includes options for lmax_n, lmax_t and optional advanced inputs for leq_cols/max_cols.
     """
-    import ast
-    import streamlit as st
+
 
     st.header("Broadband Summary")
 
