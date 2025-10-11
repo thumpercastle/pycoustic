@@ -183,7 +183,7 @@ with st.sidebar:
         if not files:
             st.stop()
     # Integration period entry in expander container
-    with st.expander("Integration Period", expanded=True):
+    with st.expander("Graph Integration Period", expanded=True):
         int_period = st.number_input(
             "Insert new integration period (must be larger than data)",
             step=1,
@@ -452,7 +452,7 @@ if summary_tab is not None:
         if "lmax_kwargs" not in st.session_state:
             st.session_state.lmax_kwargs = {"n": 10, "t": "2min", "period": "nights"}
 
-        st.markdown("##Lmax Spectra Parameters")
+        st.markdown("# Parameters")
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -505,52 +505,17 @@ if summary_tab is not None:
         if st.session_state.df_lmax is not None:
             st.dataframe(st.session_state.df_lmax)
 
-        #     # Load previous values if set; otherwise provide sensible defaults
-        #     defaults = st.session_state.get("lmax_args", {"n": 10, "t": "2min", "period": "days"})
-        #     c1, c2, c3 = st.columns(3)
-        #
-        #     n_val = c1.number_input("n (integer)", min_value=1, step=1, value=int(defaults["n"]))
-        #     t_val = c2.text_input('t (e.g., "2min")', value=str(defaults["t"]))
-        #     period_options = ["days", "evenings", "nights"]
-        #     period_val = c3.selectbox(
-        #         "period",
-        #         options=period_options,
-        #         index=period_options.index(defaults.get("period", "days")),
-        #     )
-        #
-        #     if st.button("Apply Lmax parameters", type="primary"):
-        #         st.session_state["lmax_args"] = {"n": int(n_val), "t": t_val, "period": period_val}
-        #         try:
-        #             lmax_df = survey.lmax_spectra(n=int(n_val), t=t_val, period=period_val)
-        #             st.session_state["lmax_spec_df"] = lmax_df
-        #             st.success("Lmax spectra updated.")
-        #         except Exception as e:
-        #             st.error(f"Error computing Lmax spectra: {e}")
-        #
-        # try:
-        #     # Prefer a precomputed dataframe if your app already produces it
-        #     df_lmax = None
-        #     if "lmax_spec_df" in globals() and isinstance(lmax_spec_df, pd.DataFrame):
-        #         df_lmax = lmax_spec_df
-        #     elif "survey" in globals() and survey is not None:
-        #         df_lmax = survey.lmax_spectra()
-        #
-        #     if df_lmax is not None and not df_lmax.empty:
-        #         st.dataframe(df_lmax, use_container_width=True)
-        #     else:
-        #         st.info("No Lmax spectra available. Load logs and compute the survey summary first.")
-        # except Exception as e:
-        #     st.warning(f"Unable to display Lmax spectra table: {e}")
-
         # Leq spectra table
         st.subheader("Leq spectra")
         try:
-            # Prefer a cached value if you already store it
-            leq_spec_df = st.session_state.get("leq_spec_df")
-            if leq_spec_df is None:
-                leq_spec_df = survey.leq_spectra()
-                # Cache for reuse elsewhere in the UI
-                st.session_state["leq_spec_df"] = leq_spec_df
+            # Always compute the full Leq spectra across all logs/positions
+            leq_spec_df = survey.leq_spectra()
+            st.session_state["leq_spec_df"] = leq_spec_df
+
+            # Flatten MultiIndex columns (if present) so the table renders clearly
+            if hasattr(leq_spec_df, "columns") and isinstance(leq_spec_df.columns, pd.MultiIndex):
+                leq_spec_df = leq_spec_df.copy()
+                leq_spec_df.columns = [" / ".join(map(str, c)) for c in leq_spec_df.columns.to_flat_index()]
 
             if leq_spec_df is not None and hasattr(leq_spec_df, "empty") and not leq_spec_df.empty:
                 st.dataframe(leq_spec_df, use_container_width=True)
@@ -627,3 +592,10 @@ if summary_tab is not None:
         else:
             st.info("No modal results to display.")
 #testing
+# Python
+# ... inside the method that prepares dataframes for rendering per tab/section ...
+# Make sure `pd` is already imported as pandas and `self.leq_spec_df` has been set via self.survey.leq_spectra()
+
+
+
+# ... keep the rest of your conditions (e.g., for other tables) unchanged ...
