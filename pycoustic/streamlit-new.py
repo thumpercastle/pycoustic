@@ -131,7 +131,8 @@ with st.expander("1) Load CSV data", expanded=True):
 ss["survey"] = Survey()
 for k in ss["logs"].keys():
     ss["survey"].add_log(ss["survey"])
+    st.text("Yes")
 
 with st.expander("Broadband Summary", expanded=True):
-    df = ss["survey"].resi_summary()
-    st.dataframe(df)
+    df = ss["survey"]._logs
+    st.text(df)
