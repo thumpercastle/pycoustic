@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from .weather import WeatherHistory
+from weather import WeatherHistory
 
 
 DECIMALS=1
