@@ -128,14 +128,14 @@ with st.expander("1) Load CSV data", expanded=True):
     if ss["logs"]:
         st.info(f"Current logs in session: {', '.join(ss['logs'].keys())}")
 
-ss["survey"] = Survey()
+surv = Survey()
 for k in ss["logs"].keys():
-    ss["survey"].add_log(ss["survey"], name="k")
+    surv.add_log(surv, name="k")
     st.text(k)
 
-st.text(type(ss["survey"]))
-st.table(ss["survey"].resi_summary())
+st.text(type(surv))
+st.table(surv.resi_summary())
 
 with st.expander("Broadband Summary", expanded=True):
-    df = ss["survey"]._logs
+    df = surv._logs
     st.text(df)
