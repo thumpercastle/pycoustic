@@ -7,7 +7,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 # Import pycoustic classes
-from pycoustic import Log, Survey
+from log import *
+from survey import *
 
 st.set_page_config(page_title="pycoustic GUI", layout="wide")
 st.title("pycoustic Streamlit GUI")
