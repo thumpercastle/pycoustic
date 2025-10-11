@@ -126,7 +126,9 @@ with st.expander("1) Load CSV data", expanded=True):
     if ss["logs"]:
         st.info(f"Current logs in session: {', '.join(ss['logs'].keys())}")
 
-ss["survey"] = build_survey(ss["logs"])
+ss["survey"] = Survey()
+for k in ss["logs"].keys():
+    ss["survey"].add_log(ss["survey"])
 
 with st.expander("Broadband Summary", expanded=True):
     df = ss["survey"].resi_summary()
