@@ -122,27 +122,27 @@ class Survey:
             headers_for_log = []  # new: collect headers per log
 
             # Day
-            days = lg._leq_by_date(lg._get_period(data=lg.get_antilogs(), period="days"), cols=leq_cols)
+            days = lg.leq_by_date(lg.get_period(data=lg.get_antilogs(), period="days"), cols=leq_cols)
             days.sort_index(inplace=True)
             combined_list.append(days)
             headers_for_log.extend(["Daytime"] * len(leq_cols))  # changed: don't reset global headers
 
             # Evening
             if lg.is_evening():
-                evenings = lg._leq_by_date(lg._get_period(data=lg.get_antilogs(), period="evenings"), cols=leq_cols)
+                evenings = lg.leq_by_date(lg.get_period(data=lg.get_antilogs(), period="evenings"), cols=leq_cols)
                 evenings.sort_index(inplace=True)
                 combined_list.append(evenings)
                 headers_for_log.extend(["Evening"] * len(leq_cols))
 
             # Night Leq
-            nights = lg._leq_by_date(lg._get_period(data=lg.get_antilogs(), period="nights"), cols=leq_cols)
+            nights = lg.leq_by_date(lg.get_period(data=lg.get_antilogs(), period="nights"), cols=leq_cols)
             nights.sort_index(inplace=True)
             combined_list.append(nights)
             headers_for_log.extend(["Night-time"] * len(leq_cols))
 
             # Night max
             maxes = lg.as_interval(t=lmax_t)
-            maxes = lg._get_period(data=maxes, period="nights", night_idx=True)
+            maxes = lg.get_period(data=maxes, period="nights", night_idx=True)
             maxes = lg.get_nth_high_low(n=lmax_n, data=maxes)[max_cols]
             maxes.sort_index(inplace=True)
             try:

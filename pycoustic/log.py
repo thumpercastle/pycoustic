@@ -184,7 +184,7 @@ class Log:
             df = pd.DataFrame(data=df)
         return df.set_index(idx, inplace=False)
 
-    def _get_period(self, data=None, period="days", night_idx=True):
+    def get_period(self, data=None, period="days", night_idx=True):
         """
         Private method to get data for daytime, evening or night-time periods.
         :param data: Input data, usually master
@@ -204,7 +204,7 @@ class Log:
                 data = self._return_as_night_idx(data=data)
             return data.between_time(self._night_start, self._day_start, inclusive="left")
 
-    def _leq_by_date(self, data, cols=None):
+    def leq_by_date(self, data, cols=None):
         """
         Private method to undertake Leq calculations organised by date. For contiguous night-time periods crossing
         over midnight (e.g. from 23:00 to 07:00), the input data needs to have a night-time index.
