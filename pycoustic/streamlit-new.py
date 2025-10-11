@@ -38,33 +38,6 @@ def save_upload_to_tmp(uploaded_file) -> str:
         return tmp.name
 
 
-def build_survey(log_map: dict, times_kwarg: dict | None = None) -> Survey:
-    """Create a Survey, attach logs, and optionally call set_periods(times=...)."""
-    survey = Survey()
-
-    # Attach logs to the Survey (simple, direct assignment to internal storage)
-    # If a public adder method exists, prefer that; fallback to internal attribute.
-    if hasattr(survey, "add_log"):
-        for key, lg in log_map.items():
-            try:
-                survey.add_log(key, lg)  # type: ignore[attr-defined]
-            except Exception:
-                # Fallback if signature differs
-                setattr(survey, "_logs", log_map)
-                break
-    else:
-        setattr(survey, "_logs", log_map)
-
-    # Apply periods if provided
-    if times_kwarg is not None:
-        try:
-            survey.set_periods(times=times_kwarg)
-        except Exception as e:
-            st.warning(f"set_periods failed with provided times: {e}")
-
-    return survey
-
-
 # File Upload in expander container
 with st.expander("1) Load CSV data", expanded=True):
     st.write("Upload one or more CSV files to create Log objects for a single Survey.")
@@ -128,14 +101,40 @@ with st.expander("1) Load CSV data", expanded=True):
     if ss["logs"]:
         st.info(f"Current logs in session: {', '.join(ss['logs'].keys())}")
 
-surv = Survey()
-for k in ss["logs"].keys():
-    surv.add_log(surv, name="k")
-    st.text(k)
+# Main Window / Data Load
+with st.spinner("Processing Data...", show_time=True):
+    # Load each uploaded CSV into a pycoustic Log
+    logs: Dict[str, Log] = {}
+    for upload_file in files:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+            tmp.write(upload_file.getbuffer())
+            path = tmp.name
+        try:
+            logs[upload_file.name] = Log(path)
+        except Exception as err:
+            st.error(f"Failed to load `{upload_file.name}` into Pycoustic: {err}")
+        finally:
+            os.unlink(path)
 
-st.text(type(surv))
-st.table(surv.resi_summary())
+    # Build Survey and pull summary + spectra
+    summary_df = leq_spec_df = lmax_spec_df = None
+    summary_error = ""
+    if logs:
+        try:
+            survey = Survey()
+            if callable(getattr(survey, "add_log", None)):
+                for name, lg in logs.items():
+                    survey.add_log(lg, name=name)
+            elif hasattr(survey, "_logs"):
+                survey._logs = logs
 
-with st.expander("Broadband Summary", expanded=True):
-    df = surv._logs
-    st.text(df)
+            summary_df = survey.resi_summary()
+            leq_spec_df = getattr(survey, "typical_leq_spectra", lambda: None)()
+            lmax_spec_df = getattr(survey, "lmax_spectra", lambda: None)()
+        except Exception as err:
+            summary_error = str(err)
+    else:
+        summary_error = "No valid logs loaded."
+
+    # Helper list of “position” names (i.e. filenames)
+    pos_list = list(logs.keys())
