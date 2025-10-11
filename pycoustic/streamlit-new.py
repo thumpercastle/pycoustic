@@ -133,6 +133,8 @@ for k in ss["logs"].keys():
     ss["survey"].add_log(ss["survey"], name="k")
     st.text(k)
 
+st.text(type(ss["survey"]))
+
 with st.expander("Broadband Summary", expanded=True):
     df = ss["survey"]._logs
     st.text(df)
