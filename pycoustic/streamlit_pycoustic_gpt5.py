@@ -1,6 +1,9 @@
 # streamlit_pycoustic_app.py
 import ast
-from typing import Any, Dict
+import datetime as dt
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, Iterable
 
 import streamlit as st
 
@@ -25,12 +28,6 @@ def _display_result(obj: Any):
     """
     Display helper to handle common return types.
     """
-    try:
-        import pandas as pd  # noqa: F401
-        import plotly.graph_objects as go  # noqa: F401
-    except Exception:
-        pass
-
     # Plotly Figure-like
     if hasattr(obj, "to_plotly_json"):
         st.plotly_chart(obj, use_container_width=True)
@@ -50,73 +47,88 @@ def _display_result(obj: Any):
     st.write(obj)
 
 
-def _ensure_survey():
+def _ensure_state():
     if "survey" not in st.session_state:
         st.session_state["survey"] = None
+    if "periods" not in st.session_state:
+        st.session_state["periods"] = {"day": (7, 0), "evening": (19, 0), "night": (23, 0)}
 
 
-def _build_survey_from_files(files):
+def _write_uploaded_to_temp(uploaded) -> str:
+    """
+    Persist an UploadedFile to a temporary file and return the path.
+    Using a real file path keeps Log(...) happy across environments.
+    """
+    suffix = Path(uploaded.name).suffix or ".csv"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(uploaded.getbuffer())
+        return tmp.name
+
+
+def _build_survey_from_files(files) -> Survey:
     """
     Create a Survey and attach Log objects for each uploaded file.
     """
     survey = Survey()
     for f in files:
-        # Ensure stream is at start for each run
-        try:
-            f.seek(0)
-        except Exception:
-            pass
+        # Persist to disk to ensure compatibility with pandas and any path usage in Log
+        tmp_path = _write_uploaded_to_temp(f)
+        log_obj = Log(path=tmp_path)
 
-        log_obj = Log(path=f)  # pandas.read_csv accepts file-like objects
-        name = getattr(f, "name", "log")
-        # Prefer a public method if present; otherwise attach to internal store
+        key = Path(f.name).stem
+        # Attach Log to survey
         if hasattr(survey, "add_log"):
-            # If the library exposes an API, use it
             try:
-                survey.add_log(name, log_obj)
+                survey.add_log(key, log_obj)
             except TypeError:
-                # Some APIs prefer (log_obj, name)
-                survey.add_log(log_obj, name)
+                survey.add_log(log_obj, key)
         else:
-            # Fallback: set into the internal dictionary
-            # Note: name collisions will overwrite; user can upload unique filenames
-            survey._logs[name] = log_obj  # noqa: SLF001
+            # Fallback to internal storage if no public API is available
+            survey._logs[key] = log_obj  # noqa: SLF001
     return survey
+
+
+def _apply_periods_to_all_logs(survey: Survey, times: Dict[str, tuple[int, int]]):
+    """
+    Apply set_periods to each Log attached to the Survey.
+    This avoids calling set_periods on Survey if it doesn't exist.
+    """
+    logs: Iterable[Log] = getattr(survey, "_logs", {}).values()
+    for log in logs:
+        if hasattr(log, "set_periods"):
+            log.set_periods(times=times)
 
 
 def _render_period_controls(survey: Survey):
     st.subheader("Assessment Periods")
 
-    # Defaults: Day 07:00–19:00, Evening 19:00–23:00, Night 23:00–07:00
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        day_time = st.time_input("Day starts", value=None, key="period_day_start")
-    with col2:
-        eve_time = st.time_input("Evening starts", value=None, key="period_eve_start")
-    with col3:
-        night_time = st.time_input("Night starts", value=None, key="period_night_start")
+    # Current periods from session (defaults set in _ensure_state)
+    periods = st.session_state["periods"]
+    day_h, day_m = periods["day"]
+    eve_h, eve_m = periods["evening"]
+    night_h, night_m = periods["night"]
 
-    # If not set yet, pick defaults
-    import datetime as _dt
-    if day_time is None:
-        day_time = _dt.time(7, 0)
-    if eve_time is None:
-        eve_time = _dt.time(19, 0)
-    if night_time is None:
-        night_time = _dt.time(23, 0)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        day_time = st.time_input("Day starts", value=dt.time(day_h, day_m), key="period_day_start")
+    with c2:
+        eve_time = st.time_input("Evening starts", value=dt.time(eve_h, eve_m), key="period_eve_start")
+    with c3:
+        night_time = st.time_input("Night starts", value=dt.time(night_h, night_m), key="period_night_start")
 
-    # Convert immediately to (hour, minute) tuples of ints
-    times = {
+    new_periods = {
         "day": (int(day_time.hour), int(day_time.minute)),
         "evening": (int(eve_time.hour), int(eve_time.minute)),
         "night": (int(night_time.hour), int(night_time.minute)),
     }
 
-    # Apply to Survey
-    try:
-        survey.set_periods(times=times)
-    except Exception as e:
-        st.warning(f"Could not set periods: {e}")
+    if st.button("Apply periods to all logs", key="apply_periods"):
+        try:
+            _apply_periods_to_all_logs(survey, new_periods)
+            st.session_state["periods"] = new_periods
+            st.success("Periods applied to all logs.")
+        except Exception as e:
+            st.warning(f"Could not set periods: {e}")
 
 
 def _render_method_runner(survey: Survey, method_name: str, help_text: str = ""):
@@ -132,13 +144,11 @@ def _render_method_runner(survey: Survey, method_name: str, help_text: str = "")
             value="{}",
             key=f"kwargs_{method_name}",
             placeholder='Example: {"position": "UA1", "date": "2023-06-01"}',
-            height=80,
+            height=100,
         )
 
         kwargs = _parse_kwargs(kwargs_text)
-        run = st.button(f"Run {method_name}", key=f"run_{method_name}")
-
-        if run:
+        if st.button(f"Run {method_name}", key=f"run_{method_name}"):
             try:
                 fn = getattr(survey, method_name)
                 result = fn(**kwargs)
@@ -153,14 +163,14 @@ def main():
     st.set_page_config(page_title="pycoustic GUI", layout="wide")
     st.title("pycoustic – Streamlit GUI")
 
-    _ensure_survey()
+    _ensure_state()
 
     st.sidebar.header("Load CSV Logs")
     files = st.sidebar.file_uploader(
         "Upload one or more CSV files",
         type=["csv"],
         accept_multiple_files=True,
-        help="Each file will initialise a Log; all Logs are attached to one Survey."
+        help="Each file becomes a Log; all Logs go into one Survey."
     )
 
     build = st.sidebar.button("Create / Update Survey", type="primary")
@@ -168,8 +178,8 @@ def main():
     if build and files:
         try:
             survey = _build_survey_from_files(files)
-            # Set sensible default periods immediately
-            survey.set_periods(times={"day": (7, 0), "evening": (19, 0), "night": (23, 0)})
+            # Apply default periods to all logs
+            _apply_periods_to_all_logs(survey, st.session_state["periods"])
             st.session_state["survey"] = survey
             st.success("Survey created/updated.")
         except Exception as e:
@@ -187,7 +197,6 @@ def main():
     st.markdown("---")
     st.header("Survey Outputs")
 
-    # Provide simple runners for the required methods, each with kwargs injection
     _render_method_runner(
         survey,
         "resi_summary",
