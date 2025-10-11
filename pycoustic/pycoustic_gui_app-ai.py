@@ -39,6 +39,39 @@ if "period_last" not in st.session_state:
     st.session_state["period_last"] = ""
 
 # Python
+# Helper to resolve a usable Survey/Log object from session state
+def _resolve_survey_like():
+    try:
+        import streamlit as st
+    except Exception:
+        return None
+
+    survey = st.session_state.get("survey")
+    if hasattr(survey, "set_periods"):
+        return survey
+
+    # Try a few common alternative keys that may contain the actual object
+    for key in ("survey_obj", "log_obj", "log"):
+        obj = st.session_state.get(key)
+        if hasattr(obj, "set_periods"):
+            # Normalize so later code that looks up "survey" also works
+            st.session_state["survey"] = obj
+            return obj
+
+    return None
+
+
+def _coerce_hm_tuple(t):
+    if t is None:
+        return None
+    try:
+        h, m = t
+        return (int(h), int(m))
+    except Exception:
+        # Fall back to original value if it can't be coerced
+        return t
+
+
 def render_sidebar_set_periods():
     """
     Sidebar UI to choose Day/Evening/Night boundaries.
@@ -70,16 +103,17 @@ def _set_periods_on_survey(day_tuple, eve_tuple, night_tuple):
     """
     Accepts (hour, minute) tuples and updates the Survey periods.
     """
-    survey = st.session_state.get("survey")
+    survey = _resolve_survey_like()
     if survey is None:
         return
 
     times = {
-        "day": day_tuple,
-        "evening": eve_tuple,
-        "night": night_tuple,
+        "day": _coerce_hm_tuple(day_tuple),
+        "evening": _coerce_hm_tuple(eve_tuple),
+        "night": _coerce_hm_tuple(night_tuple),
     }
-    survey.set_periods(times=times)
+    if hasattr(survey, "set_periods"):
+        survey.set_periods(times=times)
 
 
 def render_resi_summary(survey):
