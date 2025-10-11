@@ -1,0 +1,86 @@
+import os
+import tempfile
+from typing import List, Dict
+
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+
+# Import pycoustic classes
+from pycoustic import Log, Survey
+
+st.set_page_config(page_title="pycoustic GUI", layout="wide")
+st.title("pycoustic Streamlit GUI")
+
+# Initialize session state
+ss = st.session_state
+
+def save_upload_to_tmp(uploaded_file) -> str:
+    """Persist an uploaded CSV to a temporary file and return its path."""
+    # Create a persistent temporary file (delete later on reset)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+        tmp.write(uploaded_file.getbuffer())
+        return tmp.name
+
+# File Upload in expander container
+with st.expander("1) Load CSV data", expanded=True):
+    st.write("Upload one or more CSV files to create Log objects for a single Survey.")
+
+    uploaded = st.file_uploader(
+        "Select CSV files",
+        type=["csv"],
+        accept_multiple_files=True,
+        help="Each CSV should match the expected pycoustic format."
+    )
+
+    if uploaded:
+        st.caption("Assign a position name for each file (defaults to base filename).")
+
+        # Build a list of (file, default_name) for user naming
+        pos_names = []
+        for idx, f in enumerate(uploaded):
+            default_name = f.name.rsplit(".", 1)[0]
+            name = st.text_input(
+                f"Position name for file {idx + 1}: {f.name}",
+                value=default_name,
+                key=f"pos_name_{f.name}_{idx}"
+            )
+            pos_names.append((f, name.strip() or default_name))
+
+        col_l, col_r = st.columns([1, 1])
+        replace = col_l.checkbox("Replace existing survey/logs", value=True)
+        load_btn = col_r.button("Load CSVs")
+
+        if load_btn:
+            if replace:
+                # Reset previous state
+                for p in ss["tmp_paths"]:
+                    try:
+                        # Cleanup files on supported OS; not critical if fails
+                        import os
+                        os.unlink(p)
+                    except Exception:
+                        pass
+                ss["tmp_paths"] = []
+                ss["logs"] = {}
+                ss["survey"] = None
+                ss["resi_df"] = None
+
+            added = 0
+            for f, pos_name in pos_names:
+                try:
+                    tmp_path = save_upload_to_tmp(f)
+                    ss["tmp_paths"].append(tmp_path)
+                    log_obj = Log(path=tmp_path)
+                    ss["logs"][pos_name] = log_obj
+                    added += 1
+                except Exception as e:
+                    st.error(f"Failed to load {f.name}: {e}")
+
+            if added > 0:
+                st.success(f"Loaded {added} file(s) into logs.")
+            else:
+                st.warning("No files loaded. Please check the CSV format and try again.")
+
+    if ss["logs"]:
+        st.info(f"Current logs in session: {', '.join(ss['logs'].keys())}")
