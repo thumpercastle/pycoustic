@@ -39,6 +39,17 @@ class Survey:
         df.columns = new_cols
         return df
 
+    def _leq_by_date(self, data, cols=None):
+        """
+        Delegate Leq-by-date computation to one of the underlying Log instances.
+        Assumes all logs share the same period configuration.
+        """
+        if not getattr(self, "_logs", None):
+            raise AttributeError("Survey has no logs available to compute _leq_by_date")
+        any_log = next(iter(self._logs.values()))
+        if not hasattr(any_log, "_leq_by_date"):
+            raise AttributeError("Underlying Log does not implement _leq_by_date")
+        return any_log._leq_by_date(data, cols=cols)
     # ###########################---PUBLIC---######################################
 
     def set_periods(self, times=None):
