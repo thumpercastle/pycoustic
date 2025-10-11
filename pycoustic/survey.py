@@ -163,7 +163,7 @@ class Survey:
 
         combi = self._insert_header(df=combi, new_head_list=period_headers, header_idx=0)
         return combi
-
+#test
     def modal(self, cols=None, by_date=False, day_t="60min", evening_t="60min", night_t="15min"):
         """
         Get a dataframe summarising Modal L90 values for each time period, as suggested by BS 4142:2014.

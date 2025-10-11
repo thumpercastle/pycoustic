@@ -183,7 +183,7 @@ class Log:
         if isinstance(df, pd.Series):
             df = pd.DataFrame(data=df)
         return df.set_index(idx, inplace=False)
-
+#test
     def get_period(self, data=None, period="days", night_idx=True):
         """
         Private method to get data for daytime, evening or night-time periods.

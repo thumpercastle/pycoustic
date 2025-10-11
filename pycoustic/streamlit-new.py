@@ -139,3 +139,4 @@ st.table(ss["survey"].resi_summary())
 with st.expander("Broadband Summary", expanded=True):
     df = ss["survey"]._logs
     st.text(df)
+    #test
