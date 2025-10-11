@@ -14,6 +14,19 @@ st.title("pycoustic Streamlit GUI")
 
 # Initialize session state
 ss = st.session_state
+ss.setdefault("tmp_paths", [])          # List[str] for cleanup
+ss.setdefault("logs", {})               # Dict[str, Log]
+ss.setdefault("survey", None)           # Survey or None
+ss.setdefault("resi_df", None)          # Cached summary
+ss.setdefault("periods_times", {        # Default times for set_periods()
+    "day": (7, 0),
+    "evening": (23, 0),
+    "night": (23, 0),
+})
+ss.setdefault("lmax_n", 5)
+ss.setdefault("lmax_t", 30)
+ss.setdefault("extra_kwargs_raw", "{}")
+
 
 def save_upload_to_tmp(uploaded_file) -> str:
     """Persist an uploaded CSV to a temporary file and return its path."""
@@ -21,6 +34,34 @@ def save_upload_to_tmp(uploaded_file) -> str:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
         tmp.write(uploaded_file.getbuffer())
         return tmp.name
+
+
+def build_survey(log_map: dict, times_kwarg: dict | None = None) -> Survey:
+    """Create a Survey, attach logs, and optionally call set_periods(times=...)."""
+    survey = Survey()
+
+    # Attach logs to the Survey (simple, direct assignment to internal storage)
+    # If a public adder method exists, prefer that; fallback to internal attribute.
+    if hasattr(survey, "add_log"):
+        for key, lg in log_map.items():
+            try:
+                survey.add_log(key, lg)  # type: ignore[attr-defined]
+            except Exception:
+                # Fallback if signature differs
+                setattr(survey, "_logs", log_map)
+                break
+    else:
+        setattr(survey, "_logs", log_map)
+
+    # Apply periods if provided
+    if times_kwarg is not None:
+        try:
+            survey.set_periods(times=times_kwarg)
+        except Exception as e:
+            st.warning(f"set_periods failed with provided times: {e}")
+
+    return survey
+
 
 # File Upload in expander container
 with st.expander("1) Load CSV data", expanded=True):
