@@ -134,6 +134,7 @@ for k in ss["logs"].keys():
     st.text(k)
 
 st.text(type(ss["survey"]))
+st.table(ss["survey"].resi_summary())
 
 with st.expander("Broadband Summary", expanded=True):
     df = ss["survey"]._logs
