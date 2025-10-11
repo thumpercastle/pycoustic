@@ -9,6 +9,7 @@ import streamlit as st
 # Import pycoustic classes
 from log import *
 from survey import *
+from weather import *
 
 st.set_page_config(page_title="pycoustic GUI", layout="wide")
 st.title("pycoustic Streamlit GUI")
