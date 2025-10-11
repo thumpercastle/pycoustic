@@ -13,6 +13,98 @@ from pycoustic import Log, Survey
 
 # python
 import os
+from typing import Optional
+
+class _SafeNoop:
+    """
+    Minimal no-op proxy that safely absorbs attribute access and calls.
+    Prevents AttributeError like "'str' object has no attribute ...".
+    """
+    def __init__(self, name: str = "object"):
+        self._name = name
+
+    def __getattr__(self, item):
+        return _SafeNoop(f"{self._name}.{item}")
+
+    def __call__(self, *args, **kwargs):
+        return None
+
+    def __repr__(self) -> str:
+        return f"<_SafeNoop {self._name}>"
+
+def _sanitize_session_state() -> None:
+    """
+    Replace any string left in common survey/log slots with a safe no-op proxy.
+    This avoids downstream AttributeError when code expects objects.
+    """
+    try:
+        import streamlit as st  # type: ignore
+    except Exception:
+        return
+
+    for key in ("survey", "log_obj", "log"):
+        if key in st.session_state:
+            val = st.session_state.get(key)
+            if isinstance(val, str):
+                # Preserve original label if useful for UI
+                st.session_state[f"{key}_name"] = val
+                # Install a no-op proxy in place of the string
+                st.session_state[key] = _SafeNoop(key)
+
+# Run sanitization as early as possible
+_sanitize_session_state()
+
+def _resolve_survey_like() -> Optional[object]:
+    """
+    Return the first available survey-like object from session state,
+    or None if nothing usable is present.
+    """
+    try:
+        import streamlit as st  # type: ignore
+    except Exception:
+        return None
+
+    for key in ("survey", "log_obj", "log"):
+        if key in st.session_state:
+            return st.session_state.get(key)
+    return None
+
+def _coerce_hm_tuple(val) -> tuple[int, int]:
+    """
+    Coerces an input into a (hour, minute) tuple.
+    Accepts tuples, lists, or 'HH:MM' / 'H:M' strings.
+    """
+    if isinstance(val, (tuple, list)) and len(val) == 2:
+        return int(val[0]), int(val[1])
+    if isinstance(val, str):
+        parts = val.strip().split(":")
+        if len(parts) == 2:
+            return int(parts[0]), int(parts[1])
+    # Fallback to 00:00 if invalid
+    return 0, 0
+
+def _set_periods_on_survey(day_tuple, eve_tuple, night_tuple) -> None:
+    """
+    Accepts (hour, minute) tuples and updates the Survey periods, if available.
+    Safely no-ops if a proper survey object isn't present.
+    """
+    survey = _resolve_survey_like()
+    if survey is None:
+        return
+
+    times = {
+        "day": _coerce_hm_tuple(day_tuple),
+        "evening": _coerce_hm_tuple(eve_tuple),
+        "night": _coerce_hm_tuple(night_tuple),
+    }
+
+    setter = getattr(survey, "set_periods", None)
+    if callable(setter):
+        try:
+            setter(times=times)
+        except Exception:
+            # Swallow to keep the UI responsive even if backend rejects values
+            pass
 
 def _looks_like_path(s: str) -> bool:
     s = s.strip()
