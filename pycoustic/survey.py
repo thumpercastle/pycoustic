@@ -106,30 +106,30 @@ class Survey:
         if max_cols is None:
             max_cols = [("Lmax", "A")]
         for key in self._logs.keys():
-            log = self._logs[key]
+            lg = self._logs[key]
             combined_list = []
             # Day
-            days = log._leq_by_date(log._get_period(data=log.get_antilogs(), period="days"), cols=leq_cols)
+            days = lg._leq_by_date(lg._get_period(data=lg.get_antilogs(), period="days"), cols=leq_cols)
             days.sort_index(inplace=True)
             combined_list.append(days)
             period_headers = ["Daytime" for i in range(len(leq_cols))]
             # Evening
-            if log.is_evening():
-                evenings = log._leq_by_date(log._get_period(data=log.get_antilogs(), period="evenings"), cols=leq_cols)
+            if lg.is_evening():
+                evenings = lg._leq_by_date(lg._get_period(data=lg.get_antilogs(), period="evenings"), cols=leq_cols)
                 evenings.sort_index(inplace=True)
                 combined_list.append(evenings)
                 for i in range(len(leq_cols)):
                     period_headers.append("Evening")
             # Night Leq
-            nights = log._leq_by_date(log._get_period(data=log.get_antilogs(), period="nights"), cols=leq_cols)
+            nights = lg._leq_by_date(lg._get_period(data=lg.get_antilogs(), period="nights"), cols=leq_cols)
             nights.sort_index(inplace=True)
             combined_list.append(nights)
             for i in range(len(leq_cols)):
                 period_headers.append("Night-time")
             # Night max
-            maxes = log.as_interval(t=lmax_t)
-            maxes = log._get_period(data=maxes, period="nights", night_idx=True)
-            maxes = log.get_nth_high_low(n=lmax_n, data=maxes)[max_cols]
+            maxes = lg.as_interval(t=lmax_t)
+            maxes = lg._get_period(data=maxes, period="nights", night_idx=True)
+            maxes = lg.get_nth_high_low(n=lmax_n, data=maxes)[max_cols]
             maxes.sort_index(inplace=True)
             #  +++
             # SS Feb2025  - Code changed to prevent exception
