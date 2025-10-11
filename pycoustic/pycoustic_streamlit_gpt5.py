@@ -11,6 +11,73 @@ import streamlit as st
 # Import pycoustic classes
 from pycoustic import Log, Survey
 
+# python
+import os
+
+def _looks_like_path(s: str) -> bool:
+    s = s.strip()
+    return (
+        s.lower().endswith(".csv")
+        or os.sep in s
+        or "/" in s
+        or "\\" in s
+    )
+
+def _usable_acoustic_obj(obj) -> bool:
+    # Consider it usable if it exposes either API used elsewhere.
+    return hasattr(obj, "set_periods") or hasattr(obj, "_leq_by_date")
+
+def _coerce_or_clear_state_key(st, key: str) -> None:
+    """
+    If st.session_state[key] is a string:
+      - If it looks like a CSV path, try to build a Log object from it.
+      - Otherwise, move it to key_name and clear the object slot to avoid attribute errors.
+    """
+    if key not in st.session_state:
+        return
+
+    val = st.session_state.get(key)
+
+    # Already usable object
+    if _usable_acoustic_obj(val):
+        return
+
+    # Try to coerce from a CSV-like path string
+    if isinstance(val, str):
+        if _looks_like_path(val):
+            try:
+                import pycoustic as pc  # Lazy import
+                st.session_state[key] = pc.Log(path=val.strip())
+                return
+            except Exception:
+                # Fall through to clearing if coercion fails
+                pass
+
+        # Preserve label for UI, clear the object slot to avoid attribute errors
+        st.session_state[f"{key}_name"] = val
+        st.session_state[key] = None
+
+def _normalize_session_state() -> None:
+    try:
+        import streamlit as st  # type: ignore
+    except Exception:
+        return
+
+    # Coerce or clear common object keys
+    for k in ("survey", "log_obj", "log"):
+        _coerce_or_clear_state_key(st, k)
+
+    # Promote first usable object into the canonical "survey" slot
+    if not _usable_acoustic_obj(st.session_state.get("survey")):
+        for k in ("log_obj", "log"):
+            candidate = st.session_state.get(k)
+            if _usable_acoustic_obj(candidate):
+                st.session_state["survey"] = candidate
+                break
+
+# Run normalization early so downstream code doesn't encounter attribute errors
+_normalize_session_state()
+
 
 # --------------- Helpers ---------------
 
