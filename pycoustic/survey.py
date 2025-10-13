@@ -1,6 +1,8 @@
+import requests
 import pandas as pd
 import numpy as np
-from weather import WeatherHistory
+import datetime as dt
+# from .weather import WeatherHistory
 
 
 DECIMALS=1
@@ -33,10 +35,31 @@ class Survey:
         return df.set_index(idx, inplace=False)
 
     def _insert_header(self, df=None, new_head_list=None, header_idx=None):
-        cols = df.columns.to_list()
-        new_cols = [list(c) for c in zip(*cols)]
-        new_cols.insert(header_idx, new_head_list)
-        df.columns = new_cols
+        if df is None or new_head_list is None:
+            return df
+
+        ncols = df.shape[1]
+
+        # Allow scalar broadcast for convenience
+        if isinstance(new_head_list, (str, int, float)):
+            new_head_list = [new_head_list] * ncols
+
+        if len(new_head_list) != ncols:
+            raise ValueError(
+                f"new_head_list length ({len(new_head_list)}) must equal number of columns ({ncols})."
+            )
+
+        cols = list(df.columns)
+        # Normalize columns into list of tuples
+        if isinstance(df.columns, pd.MultiIndex):
+            tuples = cols  # already list of tuples
+        else:
+            tuples = [(c,) for c in cols]
+
+        # Build arrays per level and insert new header list
+        arrays = [list(x) for x in zip(*tuples)]
+        arrays.insert(header_idx, list(new_head_list))
+        df.columns = pd.MultiIndex.from_arrays(arrays)
         return df
 
     # def _leq_by_date(self, data, cols=None):
@@ -111,34 +134,33 @@ class Survey:
         :return: A dataframe presenting a summary of the Leq and Lmax values requested.
         """
         combi = pd.DataFrame()
-        period_headers = []
         if leq_cols is None:
             leq_cols = [("Leq", "A")]
         if max_cols is None:
             max_cols = [("Lmax", "A")]
 
-        for key, lg in self._logs.items():  # changed: iterate items() to get lg directly
-            combined_list = []
-            headers_for_log = []  # new: collect headers per log
+        for key, lg in self._logs.items():
+            period_blocks = []
+            period_names = []
 
             # Day
             days = lg.leq_by_date(lg.get_period(data=lg.get_antilogs(), period="days"), cols=leq_cols)
             days.sort_index(inplace=True)
-            combined_list.append(days)
-            headers_for_log.extend(["Daytime"] * len(leq_cols))  # changed: don't reset global headers
+            period_blocks.append(days)
+            period_names.append("Daytime")
 
-            # Evening
+            # Evening (optional)
             if lg.is_evening():
                 evenings = lg.leq_by_date(lg.get_period(data=lg.get_antilogs(), period="evenings"), cols=leq_cols)
                 evenings.sort_index(inplace=True)
-                combined_list.append(evenings)
-                headers_for_log.extend(["Evening"] * len(leq_cols))
+                period_blocks.append(evenings)
+                period_names.append("Evening")
 
             # Night Leq
             nights = lg.leq_by_date(lg.get_period(data=lg.get_antilogs(), period="nights"), cols=leq_cols)
             nights.sort_index(inplace=True)
-            combined_list.append(nights)
-            headers_for_log.extend(["Night-time"] * len(leq_cols))
+            period_blocks.append(nights)
+            period_names.append("Night-time")
 
             # Night max
             maxes = lg.as_interval(t=lmax_t)
@@ -151,17 +173,19 @@ class Survey:
             except Exception as e:
                 print(f"Error converting index to date: {e}")
             maxes.index.name = None
-            combined_list.append(maxes)
-            headers_for_log.extend(["Night-time"] * len(max_cols))
+            period_blocks.append(maxes)
+            period_names.append("Night-time")
 
-            summary = pd.concat(objs=combined_list, axis=1)
+            # Build Period as a proper column level to avoid manual header length mismatches
+            summary = pd.concat(objs=period_blocks, axis=1, keys=period_names, names=["Period"])
+
+            # Add the per-log super level (kept as before)
             summary = self._insert_multiindex(df=summary, super=key)
+
+            # Stack logs by rows; columns remain aligned across logs
             combi = pd.concat(objs=[combi, summary], axis=0)
 
-            # append this log's headers to the global list
-            period_headers.extend(headers_for_log)
-
-        combi = self._insert_header(df=combi, new_head_list=period_headers, header_idx=0)
+        # No manual header insertion needed anymore; Period is already a column level
         return combi
 #test
     def modal(self, cols=None, by_date=False, day_t="60min", evening_t="60min", night_t="15min"):
@@ -193,17 +217,17 @@ class Survey:
             pos_summary = []
             # Daytime
             period_headers = ["Daytime"]
-            days = log.get_modal(data=log._get_period(data=log.as_interval(t=day_t), period="days"), by_date=by_date, cols=cols)
+            days = log.get_modal(data=log.get_period(data=log.as_interval(t=day_t), period="days"), by_date=by_date, cols=cols)
             days.sort_index(inplace=True)
             pos_summary.append(days)
             # Evening
             if log.is_evening():
                 period_headers.append("Evening")
-                evenings = log.get_modal(data=log._get_period(data=log.as_interval(t=evening_t), period="evenings"), by_date=by_date, cols=cols)
+                evenings = log.get_modal(data=log.get_period(data=log.as_interval(t=evening_t), period="evenings"), by_date=by_date, cols=cols)
                 evenings.sort_index(inplace=True)
                 pos_summary.append(evenings)
             # Night time
-            nights = log.get_modal(data=log._get_period(data=log.as_interval(t=night_t), period="nights"), by_date=by_date, cols=cols)
+            nights = log.get_modal(data=log.get_period(data=log.as_interval(t=night_t), period="nights"), by_date=by_date, cols=cols)
             nights.sort_index(inplace=True)
             pos_summary.append(nights)
             period_headers.append("Night-time")
@@ -234,17 +258,17 @@ class Survey:
             pos_summary = []
             # Daytime
             period_headers = ["Daytime"]
-            days = log.counts(data=log._get_period(data=log.as_interval(t=day_t), period="days"), cols=cols)
+            days = log.counts(data=log.get_period(data=log.as_interval(t=day_t), period="days"), cols=cols)
             days.sort_index(inplace=True)
             pos_summary.append(days)
             # Evening
             if log.is_evening():
                 period_headers.append("Evening")
-                evenings = log.counts(data=log._get_period(data=log.as_interval(t=evening_t), period="evenings"), cols=cols)
+                evenings = log.counts(data=log.get_period(data=log.as_interval(t=evening_t), period="evenings"), cols=cols)
                 evenings.sort_index(inplace=True)
                 pos_summary.append(evenings)
             # Night time
-            nights = log.counts(data=log._get_period(data=log.as_interval(t=night_t), period="nights"), cols=cols)
+            nights = log.counts(data=log.get_period(data=log.as_interval(t=night_t), period="nights"), cols=cols)
             nights.sort_index(inplace=True)
             pos_summary.append(nights)
             period_headers.append("Night-time")
@@ -276,7 +300,7 @@ class Survey:
         for key in self._logs.keys():
             log = self._logs[key]
             combined_list = []
-            maxes = log.get_nth_high_low(n=n, data=log._get_period(data=log.as_interval(t=t), period=period))[["Lmax", "Time"]]
+            maxes = log.get_nth_high_low(n=n, data=log.get_period(data=log.as_interval(t=t), period=period))[["Lmax", "Time"]]
             maxes.sort_index(inplace=True)
             combined_list.append(maxes)
             summary = pd.concat(objs=combined_list, axis=1)
@@ -299,15 +323,15 @@ class Survey:
         for key in self._logs.keys():
             log = self._logs[key]
             # Day
-            days = log._get_period(data=log.get_antilogs(), period="days")
+            days = log.get_period(data=log.get_antilogs(), period="days")
             days = days[leq_cols].apply(lambda x: np.round(10*np.log10(np.mean(x)), DECIMALS))
             # Night-time
-            nights = log._get_period(data=log.get_antilogs(), period="nights")
+            nights = log.get_period(data=log.get_antilogs(), period="nights")
             nights = nights[leq_cols].apply(lambda x: np.round(10*np.log10(np.mean(x)), DECIMALS))
             df = pd.DataFrame
             # Evening
             if log.is_evening():
-                evenings = log._get_period(data=log.get_antilogs(), period="evenings")
+                evenings = log.get_period(data=log.get_antilogs(), period="evenings")
                 evenings = evenings[leq_cols].apply(lambda x: np.round(10 * np.log10(np.mean(x)), DECIMALS))
                 df = pd.concat([days, evenings, nights], axis=1, keys=["Daytime", "Evening", "Night-time"])
             else:
@@ -342,6 +366,101 @@ class Survey:
             raise ValueError("No weather history available. Use Survey.weather() first.")
         return pd.DataFrame([self._weatherhist.min(), self._weatherhist.max(), self._weatherhist.mean()],
                             index=["Min", "Max", "Mean"]).drop(columns=["dt"]).round(decimals=1)
+
+
+
+appid = ""
+# with open("tests/openweather_app_id.txt") as f:
+#     appid = f.readlines()[0]
+
+w_dict = {
+    "start": "2022-09-16 12:00:00",
+    "end": "2022-09-17 18:00:00",
+    "interval": 6,
+    "api_key": appid,
+    "country": "GB",
+    "postcode": "WC1",
+    "tz": "GB"
+}
+
+
+def test_weather_obj(weather_test_dict):
+    hist = WeatherHistory(start=w_dict["start"], end=w_dict["end"], interval=w_dict["interval"],
+                          api_key=w_dict["api_key"], country=w_dict["country"], postcode=w_dict["postcode"],
+                          tz=w_dict["tz"])
+    hist.compute_weather_history()
+    return hist
+
+#TODO: Make this take the start and end times of a Survey object.
+#TODO: Implement post codes instead of coordinates
+#TODO: Implement the WeatherHistory as methods within Survey.
+class WeatherHistory:
+    def __init__(self):
+        return
+
+    def reinit(self, start=None, end=None, interval=6, api_key="", country="GB", postcode="WC1", tz="",
+                 units="metric"):
+        if api_key==None:
+            raise ValueError("API key is missing")
+        if type(start) == str:
+            self._start = dt.datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
+        else:
+            self._start = start
+        if type(end) == str:
+            self._end = dt.datetime.strptime(end, "%Y-%m-%d %H:%M:%S")
+        else:
+            self._end = end
+        self._interval = interval
+        self._api_key = str(api_key)
+        self._lat, self._lon = self.get_latlon(api_key=api_key, country=country, postcode=postcode)
+        self._hist = None
+        self._units = units
+
+    def get_latlon(self, api_key="", country="GB", postcode=""):
+        query = str("http://api.openweathermap.org/geo/1.0/zip?zip=" + postcode + "," + country + "&appid=" + api_key)
+        resp = requests.get(query)
+        return resp.json()["lat"], resp.json()["lon"]
+
+    def _construct_api_call(self, timestamp):
+        base = "https://api.openweathermap.org/data/3.0/onecall/timemachine?"
+        query = str(base + "lat=" + str(self._lat) + "&" + "lon=" + str(self._lon) + "&" + "units=" + self._units + \
+                    "&" + "dt=" + str(timestamp) + "&" + "appid=" + self._api_key)
+        return query
+
+    def _construct_timestamps(self):
+        next_time = (self._start + dt.timedelta(hours=self._interval))
+        timestamps = [int(self._start.timestamp())]
+        while next_time < self._end:
+            timestamps.append(int(next_time.timestamp()))
+            next_time += dt.timedelta(hours=self._interval)
+        return timestamps
+
+    def _make_and_parse_api_call(self, query):
+        response = requests.get(query)
+        # This drops some unwanted cols like lat, lon, timezone and tz offset.
+        resp_dict = response.json()["data"][0]
+        del resp_dict["weather"]    # delete weather key as not useful.
+        # TODO: parse 'weather' nested dict.
+        return resp_dict
+
+    def compute_weather_history(self, drop_cols):
+        # construct timestamps
+        timestamps = self._construct_timestamps()
+        # make calls to API
+        responses = []
+        for ts in timestamps:
+            query = self._construct_api_call(timestamp=ts)
+            response_dict = self._make_and_parse_api_call(query=query)
+            responses.append(pd.Series(response_dict))
+        df = pd.concat(responses, axis=1).transpose()
+        for col in ["dt", "sunrise", "sunset"]:
+            df[col] = df[col].apply(lambda x: dt.datetime.fromtimestamp(int(x)))  # convert timestamp into datetime
+        df.drop(columns=drop_cols, inplace=True)
+        return df
+
+    def get_weather_history(self):
+        return self._hist
+
 
 
 # TODO: Fix this bug in weatherhist
@@ -396,37 +515,4 @@ class Survey:
 #   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pycoustic\survey.py", line 328, in weather_summary
 #     return pd.DataFrame([self._weatherhist.min(), self._weatherhist.max(), self._weatherhist.mean()],
 #                          ^^^^^^^^^^^^^^^^^^^^^^^
-#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\frame.py", line 11643, in min
-#     result = super().min(axis, skipna, numeric_only, **kwargs)
-#              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\generic.py", line 12388, in min
-#     return self._stat_function(
-#            ^^^^^^^^^^^^^^^^^^^^
-#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\generic.py", line 12377, in _stat_function
-#     return self._reduce(
-#            ^^^^^^^^^^^^^
-#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\frame.py", line 11562, in _reduce
-#     res = df._mgr.reduce(blk_func)
-#           ^^^^^^^^^^^^^^^^^^^^^^^^
-#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\internals\managers.py", line 1500, in reduce
-#     nbs = blk.reduce(func)
-#           ^^^^^^^^^^^^^^^^
-#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\internals\blocks.py", line 404, in reduce
-#     result = func(self.values)
-#              ^^^^^^^^^^^^^^^^^
-#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\frame.py", line 11481, in blk_func
-#     return op(values, axis=axis, skipna=skipna, **kwds)
-#            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\nanops.py", line 147, in f
-#     result = alt(values, axis=axis, skipna=skipna, **kwds)
-#              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\nanops.py", line 404, in new_func
-#     result = func(values, axis=axis, skipna=skipna, mask=mask, **kwargs)
-#              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pandas\core\nanops.py", line 1098, in reduction
-#     result = getattr(values, meth)(axis)
-#              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\numpy\_core\_methods.py", line 48, in _amin
-#     return umr_minimum(a, axis, None, out, keepdims, initial, where)
-#            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-# TypeError: '<=' not supported between instances of 'dict' and 'dict'
+#   File "C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\
