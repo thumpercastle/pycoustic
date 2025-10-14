@@ -189,6 +189,7 @@ class Survey:
         return combi
 #test
     def modal(self, cols=None, by_date=False, day_t="60min", evening_t="60min", night_t="15min"):
+        #TODO rename second level index so it is not 'date'
         """
         Get a dataframe summarising Modal L90 values for each time period, as suggested by BS 4142:2014.
         Currently, this method rounds the values to 0 decimal places by default and there is no alternative
@@ -316,30 +317,71 @@ class Survey:
         For all Leq columns, use ["Leq"]. For specific columns, use list of tuples [("Leq", "A"), ("Leq", 125)]
         :return: A dataframe with a continuous Leq computation across dates, for each time period.
         """
-        #TODO: C:\Users\tonyr\PycharmProjects\pycoustic\tests.py:674: FutureWarning: The behavior of pd.concat with len(keys) != len(objs) is deprecated. In a future version this will raise instead of truncating to the smaller of the two sequences combi = pd.concat(all_pos, axis=1, keys=["UA1", "UA2"])
         all_pos = []
+        labels = []
+
         if leq_cols is None:
             leq_cols = ["Leq"]
-        for key in self._logs.keys():
-            log = self._logs[key]
+
+        for label, log in self._logs.items():
             # Day
             days = log.get_period(data=log.get_antilogs(), period="days")
-            days = days[leq_cols].apply(lambda x: np.round(10*np.log10(np.mean(x)), DECIMALS))
+            days = days[leq_cols].apply(lambda x: np.round(10 * np.log10(np.mean(x)), DECIMALS))
+
             # Night-time
             nights = log.get_period(data=log.get_antilogs(), period="nights")
-            nights = nights[leq_cols].apply(lambda x: np.round(10*np.log10(np.mean(x)), DECIMALS))
-            df = pd.DataFrame
-            # Evening
+            nights = nights[leq_cols].apply(lambda x: np.round(10 * np.log10(np.mean(x)), DECIMALS))
+
+            # Evening (if applicable)
             if log.is_evening():
                 evenings = log.get_period(data=log.get_antilogs(), period="evenings")
                 evenings = evenings[leq_cols].apply(lambda x: np.round(10 * np.log10(np.mean(x)), DECIMALS))
                 df = pd.concat([days, evenings, nights], axis=1, keys=["Daytime", "Evening", "Night-time"])
             else:
                 df = pd.concat([days, nights], axis=1, keys=["Daytime", "Night-time"])
+
             all_pos.append(df)
-        combi = pd.concat(all_pos, axis=1, keys=["UA1", "UA2"])
-        combi = combi.transpose()
-        return combi
+            labels.append(label)
+
+        if not all_pos:
+            return pd.DataFrame()
+
+        # Concatenate across logs; keys match number of objects (no FutureWarning)
+        combi = pd.concat(all_pos, axis=1, keys=labels)
+        return combi.transpose()
+    #
+    # def leq_spectra(self, leq_cols=None):
+    #     """
+    #     Compute Leqs over daytime, evening and night-time periods.
+    #     This is an overall Leq, and does not group Leqs by date.
+    #     :param leq_cols: List of strings or List of Tuples.
+    #     For all Leq columns, use ["Leq"]. For specific columns, use list of tuples [("Leq", "A"), ("Leq", 125)]
+    #     :return: A dataframe with a continuous Leq computation across dates, for each time period.
+    #     """
+    #     #TODO: C:\Users\tonyr\PycharmProjects\pycoustic\tests.py:674: FutureWarning: The behavior of pd.concat with len(keys) != len(objs) is deprecated. In a future version this will raise instead of truncating to the smaller of the two sequences combi = pd.concat(all_pos, axis=1, keys=["UA1", "UA2"])
+    #     all_pos = []
+    #     if leq_cols is None:
+    #         leq_cols = ["Leq"]
+    #     for key in self._logs.keys():
+    #         log = self._logs[key]
+    #         # Day
+    #         days = log.get_period(data=log.get_antilogs(), period="days")
+    #         days = days[leq_cols].apply(lambda x: np.round(10*np.log10(np.mean(x)), DECIMALS))
+    #         # Night-time
+    #         nights = log.get_period(data=log.get_antilogs(), period="nights")
+    #         nights = nights[leq_cols].apply(lambda x: np.round(10*np.log10(np.mean(x)), DECIMALS))
+    #         df = pd.DataFrame
+    #         # Evening
+    #         if log.is_evening():
+    #             evenings = log.get_period(data=log.get_antilogs(), period="evenings")
+    #             evenings = evenings[leq_cols].apply(lambda x: np.round(10 * np.log10(np.mean(x)), DECIMALS))
+    #             df = pd.concat([days, evenings, nights], axis=1, keys=["Daytime", "Evening", "Night-time"])
+    #         else:
+    #             df = pd.concat([days, nights], axis=1, keys=["Daytime", "Night-time"])
+    #         all_pos.append(df)
+    #     combi = pd.concat(all_pos, axis=1, keys=["UA1", "UA2"])
+    #     combi = combi.transpose()
+    #     return combi
 
     def get_start_end(self):
         starts = [self._logs[key].get_start() for key in self._logs.keys()]

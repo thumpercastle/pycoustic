@@ -18,8 +18,8 @@ class Log:
             path,
             index_col="Time",
             parse_dates=["Time"],
-            date_format="%Y/%m/%d %H:%M",  # Explicit format to avoid the dayfirst warning
-            # dayfirst=False,  # Optional: include for clarity; default is False
+            date_format="%d/%m/%Y %H:%M",  # Explicit format to avoid the dayfirst warning
+            dayfirst=True,  # Optional: include for clarity; default is False
         )
         self._master.index = pd.to_datetime(self._master.index)
         self._master = self._master.sort_index(axis=1)
