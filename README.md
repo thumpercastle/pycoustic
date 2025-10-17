@@ -92,7 +92,7 @@ pip install pycoustic
 ### ValueError: NaTType does not support time
 This error occurs when trying to create a Log() object with a csv file. It occurs because the source csv file contains empty cells which were previously allocated (filled). It usually happens when you have entered data into some row(s) or column(s) and then deleted it, leaving previously-full cells which are now empty.\
 **Solution:** Create a new tab in your source csv file, and paste in your headers and data as you wish it to be presented to the toolkit, avoiding having to delete any columns and rows. Delete the old tab. If you do have to delete any data in the new tab, you will need to repeat the process to ensure this error is not thrown up again.
-### TODO: ADO simplified method, ADO open area, title on graphs, maps and weather summary, time resampling on graph should only allow >= measurement period.
+### TODO: ADO simplified method, ADO open area, title on graphs, maps and weather summary, time resampling on graph should only allow >= measurement period, download summary of all dataframes.
 
 ## Terms of use
 The pycoustic toolkit was built by Tony Trup of [Timbral](https://www.timbral.co.uk).
