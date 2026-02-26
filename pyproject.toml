@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pycoustic"
-version = "0.1.16"
+version = "0.1.18"
 description = ""
 authors = ["thumpercastle <tony.ryb@gmail.com>"]
 readme = "README.md"
@@ -12,6 +12,7 @@ numpy = "2.3.3"
 openpyxl = "3.1.5"
 requests = "^2.32.4"
 plotly = "^6.3.1"
+pgeocode = "0.5.0"
 streamlit = "^1.46.1"
 
 

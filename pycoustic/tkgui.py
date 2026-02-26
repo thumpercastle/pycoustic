@@ -210,7 +210,7 @@ class Application(tk.Tk):
             if analysis_type == "resi_summary":
                 params = parameters.split(",")
                 p = [None if x == "None" else x for x in params]
-                df =self.survey.resi_summary(leq_cols=p[0], max_cols=p[1], lmax_n=int(params[2]), lmax_t=params[3])  
+                df =self.survey.broadband_summary(leq_cols=p[0], max_cols=p[1], lmax_n=int(params[2]), lmax_t=params[3])
                 print ("df id a ",type(df))
             elif analysis_type == "modal_l90":
                 df = self.survey.modal()

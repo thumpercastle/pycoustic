@@ -90,7 +90,7 @@ with st.spinner("Processing Data...", show_time=True):
             elif hasattr(survey, "_logs"):
                 survey._logs = logs
 
-            summary_df = survey.resi_summary()
+            summary_df = survey.broadband_summary()
             leq_spec_df = getattr(survey, "typical_leq_spectra", lambda: None)()
             lmax_spec_df = getattr(survey, "lmax_spectra", lambda: None)()
         except Exception as err:
