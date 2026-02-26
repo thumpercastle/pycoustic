@@ -2,7 +2,66 @@ import pandas as pd
 import numpy as np
 import datetime as dt
 
+DECIMALS=0
+wb_weighting_dB = [
+    -8.4,
+   -8.3,
+   -8.3,
+   -8.1,
+   -7.6,
+   -6.1,
+   -3.5,
+   -1.1,
+   0.2,
+   0.5,
+   0.2,
+   -0.2,
+   -0.9,
+   -1.8,
+   -3.0,
+   -4.5,
+   -6.2,
+   -8.1,
+   -10.1,
+   -12.4,
+   -15.2,
+   -18.8,
+   -23.2,
+   -28.4,
+   -34.0,
+   -39.8,
+   -45.8
+]
 
+wb_weighting_factors = [
+    0.381,
+    0.385,
+    0.386,
+    0.392,
+    0.417,
+    0.496,
+    0.665,
+    0.885,
+    1.026,
+    1.054,
+    1.026,
+    0.974,
+    0.904,
+    0.814,
+    0.709,
+    0.597,
+    0.491,
+    0.395,
+    0.312,
+    0.239,
+    0.173,
+    0.115,
+    0.069,
+    0.039,
+    0.02,
+    0.02,
+    0.005
+]
 
 class Log:
     def __init__(self, path=""):
@@ -18,7 +77,7 @@ class Log:
             path,
             index_col="Time",
             parse_dates=["Time"],
-            date_format="%d/%m/%Y %H:%M",  # Explicit format to avoid the dayfirst warning
+            # date_format="%d/%m/%Y %H:%M",  # Explicit format to avoid the dayfirst warning
             dayfirst=True,  # Optional: include for clarity; default is False
         )
         self._master.index = pd.to_datetime(self._master.index)
@@ -316,13 +375,16 @@ class Log:
             return data[cols].mode()
 
     def counts(self, data=None, cols=None, round_decimals=True):
+        # This does not work with multiple columns
         if data is None:
             data = self._master
         if round_decimals:
-            data = data.round()
+            data = data.round(decimals=0)
         if cols is None:
             cols = [("L90", "A")]
-        return data[cols].value_counts()
+        df = data[cols].value_counts()
+        df.index = [int(x[0]) for x in df.index]
+        return df
 
     def set_periods(self, times=None):
         """
@@ -373,3 +435,119 @@ class Log:
 
     def get_end(self):
         return self._end
+
+
+class VibLog(Log):
+    """
+    This class is a work in progress. Do not use.
+    """
+    def __init__(self, path, units=None):
+        super().__init__(path)
+        self._units = units
+        if self._units is None:
+            self._units = "ms2"
+        self._decimals = 12
+        self._wb_weighted = self.apply_wb_weighting()
+
+    def head(self):
+        return self._master.head()
+
+    def apply_wb_weighting(self, factors=wb_weighting_factors):
+        """
+        Multiply each column in self._master by the corresponding WB weighting factor and
+        store the result in self._wb_weighted.
+
+        Notes:
+        - Applies only to numeric columns (non-numeric, e.g. the "Night idx" column, are left unchanged).
+        - The mapping is by column order: factor[i] is applied to the i-th numeric column.
+        """
+        numeric_cols = self._master.select_dtypes(include="number").columns
+
+        if len(numeric_cols) != len(factors):
+            raise ValueError(
+                f"WB weighting length mismatch: {len(numeric_cols)} numeric columns in _master "
+                f"but {len(factors)} factors were provided."
+            )
+
+        weighted = self._master.copy()
+        weighted.loc[:, numeric_cols] = weighted.loc[:, numeric_cols].mul(factors, axis=1)
+        self._wb_weighted = weighted
+        return self._wb_weighted
+
+    def sum_across_bands(self, df=None):
+        """
+        Sum values across band columns and return a DataFrame with:
+        - a new column "Sum" containing one summed figure per row
+        - the existing "Night idx" column preserved (not included in the sum)
+        - the original index preserved
+        """
+        if df is None:
+            df = self._master
+        elif df == "wb_weighted":
+            df = self._wb_weighted
+
+        night_col = "Night idx"
+        if night_col not in df.columns:
+            raise ValueError(f"Expected column {night_col!r} in DataFrame.")
+
+        # Sum only numeric columns, but explicitly exclude the Night idx column
+        numeric_cols = df.select_dtypes(include="number").columns
+        numeric_cols = [c for c in numeric_cols if c != night_col]
+
+        out = df.copy()
+        out["Sum"] = out.loc[:, numeric_cols].sum(axis=1)
+        return out
+
+
+    def evdv_from_rms(self, df=None, t=None, col=None):
+        """
+        Compute eVDV (estimated Vibration Dose Value) from a time history of RMS acceleration.
+
+        This implementation first converts RMS to an estimated peak-equivalent value by:
+            a_eq = a_rms * 1.4
+
+        Then computes (discrete):
+            eVDV = ( sum_i ( a_eq[i]^4 * t ) )^(1/4)
+
+        Parameters
+        ----------
+        df : pandas.Series or pandas.DataFrame, optional
+            If None, uses self._master.
+            If Series, treated as the a_rms time history.
+            If DataFrame, `col` must identify the column to use.
+        t : float, required
+            Assessment interval in seconds.
+        col : column label, optional
+            Column to use when `df` is a DataFrame (e.g. ("Leq","A") style labels if applicable).
+
+        Returns
+        -------
+        float
+            eVDV in the same acceleration units as the input (e.g. m/s^2).
+        """
+        if t is None:
+            raise ValueError("Parameter 't' (measurement interval in seconds) is required.")
+        if t <= 0:
+            raise ValueError("Parameter 't' must be a positive number of seconds.")
+
+        data = self._master if df is None else df
+
+        # Extract a 1D series of a_rms values
+        if isinstance(data, pd.Series):
+            a_rms = data
+        else:
+            if col is None:
+                raise ValueError("When 'df' is a DataFrame, you must provide 'col' to select the a_rms column.")
+            a_rms = data[col]
+
+        # Ensure numeric and drop missing
+        a_rms = pd.to_numeric(a_rms, errors="coerce").dropna()
+        if len(a_rms) == 0:
+            raise ValueError("No valid numeric RMS acceleration values available to compute eVDV.")
+
+        a_eq = a_rms * 1.4
+        evdv_val = float(((a_eq.pow(4).sum() * float(t)) ** 0.25))
+        return evdv_val
+    #
+    # def get_day_evdv(self):
+    #     return self.evdv_from_rms(df=self.get_period(self.sum_across_bands(self.), period="days"), t=1, col="Sum")
