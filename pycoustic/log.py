@@ -98,14 +98,21 @@ class Log:
 
     def _assign_header(self):
         csv_headers = self._master.columns.to_list()
-        superheaders = [item.split(" ")[0] for item in csv_headers]
-        subheaders = [item.split(" ")[1] for item in csv_headers]
-        # Convert numerical subheaders to ints
+        superheaders = []
+        subheaders = []
+        
+        for item in csv_headers:
+            parts = item.split(" ", 1)
+            superheaders.append(parts[0])
+            subheaders.append(parts[1] if len(parts) > 1 else "")
+            
+        # Convert numerical subheaders to floats where possible
         for i in range(len(subheaders)):
             try:
                 subheaders[i] = float(subheaders[i])
-            except Exception:
-                continue
+            except ValueError:
+                pass
+                
         self._master.columns = [superheaders, subheaders]
         self._master.sort_index(axis=1, level=1, inplace=True)
 
@@ -130,7 +137,7 @@ class Log:
         dates set to the day before.
         e.g.
         the measurement at 16-12-2024 23:57 would stay as is, but
-        the measurement at 17-12-2024 00:02 would have a night index of 16-12-2024 00:02
+        the measurement at 17-12-1024 00:02 would have a night index of 16-12-2024 00:02
         The logic behind this is that it allows us to process a night-time as one contiguous period, whereas
         Pandas would otherwise treat the two measurements as separate because of their differing dates.
         :param data:
@@ -274,7 +281,20 @@ class Log:
         """
         if cols is None:
             cols = ["Leq"]
-        return data[cols].groupby(data.index.date).mean().apply(lambda x: np.round((10 * np.log10(x)), self._decimals))
+            
+        existing_cols = [c for c in cols if c in data.columns]
+        
+        if isinstance(cols[0], tuple):
+            expected_cols = pd.MultiIndex.from_tuples(cols)
+        else:
+            expected_cols = cols
+
+        if not existing_cols:
+            idx = np.unique(data.index.date) if not data.empty else []
+            return pd.DataFrame(index=idx, columns=expected_cols, dtype=float)
+            
+        res = data[existing_cols].groupby(data.index.date).mean().apply(lambda x: np.round((10 * np.log10(x)), self._decimals))
+        return res.reindex(columns=expected_cols)
 
     # ###########################---PUBLIC---######################################
     # ss++
@@ -332,6 +352,10 @@ class Log:
             data = self._master
         if pivot_col is None:
             pivot_col = ("Lmax", "A")
+            
+        if pivot_col not in data.columns:
+            return pd.DataFrame()
+            
         nth = None
         if high:
             nth = data.sort_values(by=pivot_col, ascending=False)
@@ -359,17 +383,25 @@ class Log:
             data = data.round()
         if cols is None:
             cols = [("L90", "A")]
+            
+        existing_cols = [c for c in cols if c in data.columns]
+        if not existing_cols:
+            return pd.DataFrame() if by_date else pd.Series(dtype=float)
+            
         if by_date:
             dates = np.unique(data.index.date)
             modes_by_date = pd.DataFrame()
             for date in range(len(dates)):
                 date_str = dates[date].strftime("%Y-%m-%d")
-                mode_by_date = data[cols].loc[date_str].mode()
-                mode_by_date = self._as_multiindex(df=mode_by_date, super=date_str)
-                modes_by_date = pd.concat([modes_by_date, mode_by_date])
+                try:
+                    mode_by_date = data[existing_cols].loc[date_str].mode()
+                    mode_by_date = self._as_multiindex(df=mode_by_date, super=date_str)
+                    modes_by_date = pd.concat([modes_by_date, mode_by_date])
+                except KeyError:
+                    pass
             return modes_by_date
         else:
-            return data[cols].mode()
+            return data[existing_cols].mode()
 
     def counts(self, data=None, cols=None, round_decimals=True):
         # This does not work with multiple columns
@@ -379,7 +411,12 @@ class Log:
             data = data.round(decimals=0)
         if cols is None:
             cols = [("L90", "A")]
-        df = data[cols].value_counts()
+            
+        existing_cols = [c for c in cols if c in data.columns]
+        if not existing_cols:
+            return pd.Series(dtype="int64")
+            
+        df = data[existing_cols].value_counts()
         df.index = [int(x[0]) for x in df.index]
         return df
 
@@ -403,8 +440,8 @@ class Log:
         self._evening_start = dt.time(times["evening"][0], times["evening"][1])
         self._night_start = dt.time(times["night"][0], times["night"][1])
         # Recompute night indices
-        self._master.drop(labels="Night idx", axis=1, inplace=True)
-        self._antilogs.drop(labels="Night idx", axis=1, inplace=True)
+        self._master.drop(labels="Night idx", axis=1, level=0, inplace=True)
+        self._antilogs.drop(labels="Night idx", axis=1, level=0, inplace=True)
         self._master = self._append_night_idx(data=self._master)
         self._antilogs = self._append_night_idx(data=self._antilogs)
 

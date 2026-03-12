@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import datetime as dt
 import pgeocode as geo
-# from .weather import WeatherHistory
+from .weather import WeatherHistory
 
 
 DECIMALS=1
@@ -154,7 +154,18 @@ class Survey:
             # Night max
             maxes = lg.as_interval(t=lmax_t)
             maxes = lg.get_period(data=maxes, period="nights", night_idx=True)
-            maxes = lg.get_nth_high_low(n=lmax_n, data=maxes)[max_cols]
+            max_df = lg.get_nth_high_low(n=lmax_n, data=maxes)
+            
+            existing_max_cols = [c for c in max_cols if c in max_df.columns]
+            maxes = max_df[existing_max_cols] if existing_max_cols else pd.DataFrame(index=max_df.index)
+            
+            # Reindex to enforce requested columns (keeps pd.concat happy)
+            if isinstance(max_cols[0], tuple):
+                expected_max_cols = pd.MultiIndex.from_tuples(max_cols)
+            else:
+                expected_max_cols = max_cols
+            maxes = maxes.reindex(columns=expected_max_cols)
+            
             maxes.sort_index(inplace=True)
             try:
                 maxes.index = pd.to_datetime(maxes.index)
@@ -240,39 +251,41 @@ class Survey:
         if cols is None:
             cols = [("L90", "A")]
         combi = pd.DataFrame()
-        period_headers = []
+        
         for key in self._logs.keys():
-            # Key is the name of the measurement position
             log = self._logs[key]
             pos_summary = []
+            
             # Daytime
-            # period_headers = ["Daytime"]
             days = log.counts(data=log.get_period(data=log.as_interval(t=day_t), period="days"), cols=cols)
             days.sort_index(inplace=True)
             days.name = "Daytime"
             pos_summary.append(days)
+            
             # Evening
             if log.is_evening():
-                # period_headers.append("Evening")
                 evenings = log.counts(data=log.get_period(data=log.as_interval(t=evening_t), period="evenings"), cols=cols)
                 evenings.sort_index(inplace=True)
                 evenings.name = "Evening"
                 pos_summary.append(evenings)
+                
             # Night time
             nights = log.counts(data=log.get_period(data=log.as_interval(t=night_t), period="nights"), cols=cols)
             nights.sort_index(inplace=True)
-            pos_summary.append(nights)
             nights.name = "Night-time"
-            # period_headers.append("Night-time")
+            pos_summary.append(nights)
+            
             pos_df = pd.concat(pos_summary, axis=1)
-            # ensure integer dtype for every period block
             pos_df = pos_df.fillna(0).astype("int64")
-            pos_df = self._insert_multiindex(pos_df, super=key)
-            combi = pd.concat([combi, pos_df], axis=0)
-        # combi = self._insert_header(df=combi, new_head_list=period_headers, header_idx=0)
+            
+            # Use columns directly as multi-index levels
+            pos_df.columns = pd.MultiIndex.from_product([[key], pos_df.columns], names=["Position", "Period"])
+            combi = pd.concat([combi, pos_df], axis=1)
+            
+        combi = combi.fillna(0).astype("int64")
         combi.sort_index(inplace=True)
-        combi.rename_axis(index={'Date': 'dB'}, inplace=True)
-        return combi.fillna(0).astype("int64")
+        combi.index.name = "dB"
+        return combi
 
 
     def lmax_spectra(self, n=10, t="2min", period="nights"):
@@ -296,7 +309,12 @@ class Survey:
         for key in self._logs.keys():
             log = self._logs[key]
             combined_list = []
-            maxes = log.get_nth_high_low(n=n, data=log.get_period(data=log.as_interval(t=t), period=period))[["Lmax", "Time"]]
+            
+            max_df = log.get_nth_high_low(n=n, data=log.get_period(data=log.as_interval(t=t), period=period))
+            # Safely grab Lmax and Time if they exist
+            existing_cols = [c for c in ["Lmax", "Time"] if c in max_df.columns]
+            maxes = max_df[existing_cols] if existing_cols else pd.DataFrame()
+            
             maxes.sort_index(inplace=True)
             combined_list.append(maxes)
             summary = pd.concat(objs=combined_list, axis=1)
@@ -321,16 +339,28 @@ class Survey:
         for label, log in self._logs.items():
             # Day
             days = log.get_period(data=log.get_antilogs(), period="days")
-            days = days[leq_cols].apply(lambda x: np.round(10 * np.log10(np.mean(x)), DECIMALS))
+            valid_cols = [c for c in leq_cols if c in days.columns]
+            if valid_cols:
+                days = days[valid_cols].apply(lambda x: np.round(10 * np.log10(np.mean(x)), DECIMALS))
+            else:
+                days = pd.Series(dtype=float)
 
             # Night-time
             nights = log.get_period(data=log.get_antilogs(), period="nights")
-            nights = nights[leq_cols].apply(lambda x: np.round(10 * np.log10(np.mean(x)), DECIMALS))
+            valid_cols = [c for c in leq_cols if c in nights.columns]
+            if valid_cols:
+                nights = nights[valid_cols].apply(lambda x: np.round(10 * np.log10(np.mean(x)), DECIMALS))
+            else:
+                nights = pd.Series(dtype=float)
 
             # Evening (if applicable)
             if log.is_evening():
                 evenings = log.get_period(data=log.get_antilogs(), period="evenings")
-                evenings = evenings[leq_cols].apply(lambda x: np.round(10 * np.log10(np.mean(x)), DECIMALS))
+                valid_cols = [c for c in leq_cols if c in evenings.columns]
+                if valid_cols:
+                    evenings = evenings[valid_cols].apply(lambda x: np.round(10 * np.log10(np.mean(x)), DECIMALS))
+                else:
+                    evenings = pd.Series(dtype=float)
                 df = pd.concat([days, evenings, nights], axis=1, keys=["Daytime", "Evening", "Night-time"])
             else:
                 df = pd.concat([days, nights], axis=1, keys=["Daytime", "Night-time"])
@@ -341,314 +371,13 @@ class Survey:
         if not all_pos:
             return pd.DataFrame()
 
-        # Concatenate across logs; keys match number of objects (no FutureWarning)
+        # Concatenate across logs
         combi = pd.concat(all_pos, axis=1, keys=labels)
-        return combi.transpose().round(decimals=DECIMALS)
-
-    def get_start_end(self):
-        starts = [self._logs[key].get_start() for key in self._logs.keys()]
-        ends = [self._logs[key].get_end() for key in self._logs.keys()]
-        return min(starts), max(ends)
-
-    def weather_config(self, **kwargs):
-        """
-        Configure the embedded WeatherHistory using the Survey's overall start/end
-        (earliest log start, latest log end). Additional WeatherHistory kwargs may
-        be provided by the caller (e.g. interval_hours, api_key, country, postcode, units, recompute).
-        """
-        if not self._logs:
-            raise ValueError("No logs in Survey. Add Log objects before configuring weather.")
-        start, end = self.get_start_end()
-        return self._weather.configure(start=start, end=end, **kwargs)
-
-    def weather_compute(self, **kwargs):
-        """
-        Compute weather history via the embedded WeatherHistory for the Survey's overall
-        start/end (earliest log start, latest log end). Caller may pass through any
-        WeatherHistory.compute kwargs (e.g. drop_cols, recompute, timeout_s).
-
-        If WeatherHistory is not yet configured, this will configure it first using the
-        Survey's start/end plus any kwargs intended for configure(...).
-        """
-        if not self._logs:
-            raise ValueError("No logs in Survey. Add Log objects before computing weather.")
-        if self._weather is None:
-            raise ValueError("WeatherHistory object is missing from this Survey instance.")
-
-        # If not configured yet, configure first. Split kwargs between configure/compute by name.
-        if getattr(self._weather, "_config", None) is None:
-            cfg_keys = {"interval_hours", "api_key", "country", "postcode", "units", "recompute"}
-            cfg_kwargs = {k: v for k, v in kwargs.items() if k in cfg_keys}
-            self.weather_config(**cfg_kwargs)
-
-        compute_keys = {"drop_cols", "recompute", "timeout_s"}
-        compute_kwargs = {k: v for k, v in kwargs.items() if k in compute_keys}
-        return self._weather.compute(**compute_kwargs)
-
-    def get_weather_hist(self):
-        """Return cached computed weather dataframe (or None if not computed yet)."""
-        return self._weather.get_weather_history()
-
-    def get_weather_raw(self):
-        """Return cached raw API responses (or None if not computed yet)."""
-        return self._weather.get_raw_responses()
-
-
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
-
-
-@dataclass(frozen=True)
-class WeatherConfig:
-    start: dt.datetime
-    end: dt.datetime
-    interval_hours: int
-    api_key: str
-    country: str
-    postcode: str
-    units: str = "metric"
-
-
-class WeatherHistory:
-    """
-    Fetches historic weather snapshots from OpenWeather One Call 3.0 Time Machine endpoint
-    at a fixed interval between start and end (inclusive-ish; end is an upper bound).
-
-    Design:
-    - Configure once with (start, end, interval, api_key, country, postcode, units)
-    - Compute once and cache the resulting dataframe
-    - Subsequent compute() calls return cached data unless recompute=True
-    """
-
-    ONECALL_TIMEMACHINE_URL = "https://api.openweathermap.org/data/3.0/onecall/timemachine"
-    DEFAULT_DROP_COLS = ("sunrise", "sunset", "feels_like", "dew_point", "visibility")
-
-    def __init__(self) -> None:
-        self._config: Optional[WeatherConfig] = None
-        self._latlon: Optional[Tuple[float, float]] = None
-        self._data: Optional[pd.DataFrame] = None
-        self._raw_responses: Optional[List[Dict[str, Any]]] = None
-
-    # ----------------------------
-    # Configuration / caching
-    # ----------------------------
-    def configure(
-        self,
-        *,
-        start: Union[str, dt.datetime],
-        end: Union[str, dt.datetime],
-        interval_hours: int = 12,
-        api_key: Optional[str] = None,
-        country: str = "GB",
-        postcode: str = "WC1",
-        units: str = "metric",
-        recompute: bool = False,
-    ) -> "WeatherHistory":
-        """
-        Store config. If config changes, cached data is invalidated automatically.
-        If recompute=True, cached data is cleared even if config is unchanged.
-        """
-        if not api_key:
-            raise ValueError("api_key is required")
-
-        start_dt = self._coerce_datetime(start)
-        end_dt = self._coerce_datetime(end)
-
-        if end_dt <= start_dt:
-            raise ValueError("end must be after start")
-
-        if interval_hours <= 0:
-            raise ValueError("interval_hours must be a positive integer")
-
-        new_cfg = WeatherConfig(
-            start=start_dt,
-            end=end_dt,
-            interval_hours=int(interval_hours),
-            api_key=str(api_key),
-            country=str(country),
-            postcode=str(postcode),
-            units=str(units),
-        )
-
-        if recompute or (self._config != new_cfg):
-            self._config = new_cfg
-            self._latlon = None
-            self._data = None
-            self._raw_responses = None
-        else:
-            self._config = new_cfg
-
-        return self
-
-    def compute(
-        self,
-        *,
-        drop_cols: Optional[List[str]] = None,
-        recompute: bool = False,
-        timeout_s: int = 30,
-    ) -> pd.DataFrame:
-        """
-        Compute and return a dataframe of weather snapshots.
-        Uses cached value unless recompute=True.
-        """
-        if self._config is None:
-            raise ValueError("WeatherHistory is not configured. Call configure(...) first.")
-
-        if self._data is not None and not recompute:
-            return self._data
-
-        lat, lon = self._get_latlon(country=self._config.country, postcode=self._config.postcode)
-
-        timestamps = self._construct_timestamps(
-            start=self._config.start,
-            end=self._config.end,
-            interval_hours=self._config.interval_hours,
-        )
-
-        rows: List[pd.Series] = []
-        raw: List[Dict[str, Any]] = []
-
-        for ts in timestamps:
-            payload = self._call_openweather(
-                lat=lat,
-                lon=lon,
-                timestamp=ts,
-                api_key=self._config.api_key,
-                units=self._config.units,
-                timeout_s=timeout_s,
-            )
-            raw.append(payload)
-
-            row = self._parse_timemachine_payload(payload)
-            rows.append(pd.Series(row))
-
-        df = pd.concat(rows, axis=1).T if rows else pd.DataFrame()
-
-        # Convert unix seconds to datetimes where present
-        for col in ("dt", "sunrise", "sunset"):
-            if col in df.columns:
-                df[col] = df[col].apply(
-                    lambda x: dt.datetime.fromtimestamp(int(x)) if pd.notna(x) else x
-                )
-
-        cols_to_drop = list(self.DEFAULT_DROP_COLS) if drop_cols is None else list(drop_cols)
-        existing = [c for c in cols_to_drop if c in df.columns]
-        if existing:
-            df = df.drop(columns=existing)
-
-        self._data = df
-        self._raw_responses = raw
-        return self._data
-
-    # ----------------------------
-    # Accessors
-    # ----------------------------
-    def get_weather_history(self) -> Optional[pd.DataFrame]:
-        """Return cached dataframe (or None if not computed yet)."""
-        return self._data
-
-    def get_raw_responses(self) -> Optional[List[Dict[str, Any]]]:
-        """Return cached raw API payloads (or None if not computed yet)."""
-        return self._raw_responses
-
-    # ----------------------------
-    # Internals
-    # ----------------------------
-    @staticmethod
-    def _coerce_datetime(value: Union[str, dt.datetime]) -> dt.datetime:
-        if isinstance(value, dt.datetime):
-            return value
-        if isinstance(value, str):
-            # Accept the existing convention used elsewhere in your project
-            return dt.datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
-        raise TypeError("start/end must be datetime or 'YYYY-mm-dd HH:MM:SS' string")
-
-    def _get_latlon(self, *, country: str, postcode: str) -> Tuple[float, float]:
-        if self._latlon is not None:
-            return self._latlon
-
-        nomi = geo.Nominatim(country)
-        rec = nomi.query_postal_code(postcode)
-
-        lat = getattr(rec, "latitude", None)
-        lon = getattr(rec, "longitude", None)
-
-        if lat is None or lon is None or pd.isna(lat) or pd.isna(lon):
-            raise ValueError(f"Could not resolve postcode to lat/lon: {country=} {postcode=}")
-
-        self._latlon = (float(lat), float(lon))
-        return self._latlon
-
-    @staticmethod
-    def _construct_timestamps(*, start: dt.datetime, end: dt.datetime, interval_hours: int) -> List[int]:
-        """
-        Build timestamps starting at 'start', stepping by interval_hours, strictly less than end.
-        """
-        timestamps: List[int] = [int(start.timestamp())]
-        next_time = start + dt.timedelta(hours=interval_hours)
-        while next_time < end:
-            timestamps.append(int(next_time.timestamp()))
-            next_time += dt.timedelta(hours=interval_hours)
-        return timestamps
-
-    def _call_openweather(
-        self,
-        *,
-        lat: float,
-        lon: float,
-        timestamp: int,
-        api_key: str,
-        units: str,
-        timeout_s: int,
-    ) -> Dict[str, Any]:
-        params = {
-            "lat": lat,
-            "lon": lon,
-            "dt": int(timestamp),
-            "appid": api_key,
-            "units": units,
-        }
-
-        resp = requests.get(self.ONECALL_TIMEMACHINE_URL, params=params, timeout=timeout_s)
-        # Raise for 4xx/5xx with a helpful message
-        try:
-            resp.raise_for_status()
-        except requests.HTTPError as e:
-            msg = f"OpenWeather request failed: status={resp.status_code} body={resp.text[:500]}"
-            raise requests.HTTPError(msg) from e
-
-        return resp.json()
-
-    @staticmethod
-    def _parse_timemachine_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        OpenWeather Time Machine returns a payload with a 'data' array.
-        We take the first element as the snapshot.
-
-        Keeps 'weather' out by default; flattens some common nested fields.
-        """
-        data = payload.get("data", [])
-        if not data:
-            raise ValueError("OpenWeather payload missing 'data' items")
-
-        snap = dict(data[0])  # shallow copy
-
-        # Flatten rain/snow dicts (e.g. {"1h": 0.25}) into rain_1h
-        for k in ("rain", "snow"):
-            if k in snap and isinstance(snap[k], dict):
-                for subk, val in snap[k].items():
-                    snap[f"{k}_{subk}"] = val
-                del snap[k]
-
-        # Optionally flatten weather[0].main/description/icon into columns
-        wx = snap.get("weather")
-        if isinstance(wx, list) and wx:
-            w0 = wx[0] if isinstance(wx[0], dict) else None
-            if w0:
-                for key in ("main", "description", "icon"):
-                    if key in w0:
-                        snap[f"weather_{key}"] = w0[key]
-        if "weather" in snap:
-            del snap["weather"]
-
-        return snap
+        combi = combi.transpose().unstack(level=1)
+        
+        # After unstacking, columns are: (Metric, Freq, Period) e.g. ("Leq", "A", "Daytime")
+        # We reorder them to (Period, Metric, Freq) so they output like ("Daytime", "Leq", "A")
+        combi.columns = combi.columns.reorder_levels([2, 0, 1])
+        combi = combi.sort_index(axis=1)
+        
+        return combi.round(decimals=DECIMALS)
