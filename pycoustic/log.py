@@ -65,8 +65,6 @@ wb_weighting_factors = [
 
 class Log:
     def __init__(self, path=""):
-        #TODO C:\Users\tonyr\PycharmProjects\pycoustic\.venv2\Lib\site-packages\pycoustic\log.py:15: UserWarning:
-        #Parsing dates in %Y/%m/%d %H:%M format when dayfirst=True was specified. Pass `dayfirst=False` or specify a format to silence this warning.
         """
         The Log class is used to store the measured noise data from one data logger.
         The data must be entered in a .csv file with headings in the specific format "Leq A", "L90 125" etc.
@@ -77,8 +75,7 @@ class Log:
             path,
             index_col="Time",
             parse_dates=["Time"],
-            # date_format="%d/%m/%Y %H:%M",  # Explicit format to avoid the dayfirst warning
-            dayfirst=True,  # Optional: include for clarity; default is False
+            date_format="%Y/%m/%d %H:%M",  # Explicit format; avoids dayfirst ambiguity/warning in recent pandas
         )
         self._master.index = pd.to_datetime(self._master.index)
         self._master = self._master.sort_index(axis=1)
