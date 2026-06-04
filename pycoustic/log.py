@@ -1,8 +1,11 @@
 import datetime as dt
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+
+from .parsers.registry import default_registry
 
 DECIMALS = 0
 DEFAULT_PERIODS = {"day": (7, 0), "evening": (23, 0), "night": (23, 0)}
@@ -75,35 +78,37 @@ class Log:
         """
         Store measured noise data from one data logger.
 
-        The data must be provided in a CSV with headings in the format
-        "Leq A", "L90 125", etc.
+        Supports:
+        - pre-formatted CSV files with headings like "Leq A", "L90 125", etc.
+        - parser-backed formats such as Nor140 overview XLSX exports
 
-        :param path: File path for the CSV noise data.
+        :param path: File path for the input noise data.
         """
         self._filepath = path
-        self._master = pd.read_csv(
+        self._night_start = None
+        self._day_start = None
+        self._evening_start = None
+        self._decimals = 1
+
+        suffix = Path(path).suffix.lower()
+
+        if suffix == ".csv":
+            self._master = self._read_preformatted_csv(path)
+        else:
+            self._master = default_registry.parse(path)
+
+        self._finalise_loaded_master()
+
+    @staticmethod
+    def _read_preformatted_csv(path: str) -> pd.DataFrame:
+        df = pd.read_csv(
             path,
             index_col="Time",
             parse_dates=["Time"],
             date_format="%Y/%m/%d %H:%M",
         )
-        self._master.index = pd.to_datetime(self._master.index)
-        self._master = self._master.sort_index(axis=1)
-        self._start = self._master.index.min()
-        self._end = self._master.index.max()
-
-        self._assign_header()
-
-        self._night_start = None
-        self._day_start = None
-        self._evening_start = None
-        self._init_periods()
-
-        self._antilogs = self._prep_antilogs()
-        self._master = self._append_night_idx(data=self._master)
-        self._antilogs = self._append_night_idx(data=self._antilogs)
-
-        self._decimals = 1
+        df.index = pd.to_datetime(df.index)
+        return df
 
     @staticmethod
     def _build_time(hour_minute: tuple[int, int]) -> dt.time:
@@ -140,20 +145,33 @@ class Log:
         }
         return aliases.get(period, period)
 
+    def _finalise_loaded_master(self) -> None:
+        self._master = self._master.sort_index(axis=1)
+        self._start = self._master.index.min()
+        self._end = self._master.index.max()
+
+        self._assign_header()
+        self._init_periods()
+
+        self._antilogs = self._prep_antilogs()
+        self._master = self._append_night_idx(data=self._master)
+        self._antilogs = self._append_night_idx(data=self._antilogs)
+
     def _assign_header(self) -> None:
         """
-        Convert single-string CSV headers into a two-level column index.
+        Convert single-string headers into a two-level column index.
 
-        Example:
+        Examples:
             "Leq A" -> ("Leq", "A")
             "L90 125" -> ("L90", 125.0)
+            "BatteryLevel" -> ("BatteryLevel", "")
         """
-        csv_headers = self._master.columns.to_list()
+        headers = self._master.columns.to_list()
         superheaders: list[Any] = []
         subheaders: list[Any] = []
 
-        for item in csv_headers:
-            parts = item.split(" ", 1)
+        for item in headers:
+            parts = str(item).split(" ", 1)
             superheaders.append(parts[0])
             subheaders.append(parts[1] if len(parts) > 1 else "")
 
@@ -265,7 +283,7 @@ class Log:
         Recompute maximum readings from shorter to longer periods.
 
         :param data: Input dataframe, usually self._master.
-        :param t: Desired measurement period.
+        :param t: Desired output period.
         :param pivot_cols: Column(s) used to determine maxima.
         :param hold_spectrum: If True, use hold maxima across bands; otherwise use event maxima.
         :return: Dataframe with recomputed maxima.
@@ -331,13 +349,17 @@ class Log:
 
         period = self._period_alias(period)
 
+        if period == "nights" and night_idx:
+            data = self._return_as_night_idx(data=data)
+
+        if not isinstance(data.index, pd.DatetimeIndex):
+            return pd.DataFrame(columns=data.columns)
+
         if period == "days":
             return data.between_time(self._day_start, self._evening_start, inclusive="left")
         if period == "evenings":
             return data.between_time(self._evening_start, self._night_start, inclusive="left")
         if period == "nights":
-            if night_idx:
-                data = self._return_as_night_idx(data=data)
             return data.between_time(self._night_start, self._day_start, inclusive="left")
         return None
 
@@ -370,7 +392,7 @@ class Log:
 
     def get_data(self) -> pd.DataFrame:
         """
-        Return the loaded CSV data as a dataframe.
+        Return the loaded data as a dataframe.
         """
         return self._master
 
@@ -409,9 +431,22 @@ class Log:
         if max_pivots is None:
             max_pivots = [("Lmax", "A")]
 
+        parts: list[pd.DataFrame] = []
+
         leq = self._recompute_leq(data=antilogs, t=t, cols=leq_cols)
+        if leq is not None and not leq.empty:
+            parts.append(leq)
+
         maxes = self._recompute_max(data=data, t=t, pivot_cols=max_pivots, hold_spectrum=hold_spectrum)
-        conc = pd.concat([leq, maxes], axis=1).sort_index(axis=1).dropna(axis=1, how="all")
+        if maxes is not None and not maxes.empty:
+            parts.append(maxes)
+
+        if parts:
+            conc = pd.concat(parts, axis=1).sort_index(axis=1).dropna(axis=1, how="all")
+        else:
+            empty_index = data.resample(t).asfreq().index
+            conc = pd.DataFrame(index=empty_index)
+
         conc = self._append_night_idx(data=conc)
         return conc.dropna(axis=0, how="all")
 
@@ -498,14 +533,6 @@ class Log:
     ) -> pd.Series:
         """
         Return counts for the selected column values.
-
-        Behaviour remains aligned with the original implementation, which effectively
-        supports a single selected column for the index flattening step.
-
-        :param data: Input dataframe, usually master.
-        :param cols: Desired columns.
-        :param round_decimals: If True, round values before counting.
-        :return: Series of counts.
         """
         if data is None:
             data = self._master
@@ -588,11 +615,6 @@ class VibLog(Log):
         """
         Multiply each numeric column in self._master by the corresponding WB weighting factor
         and store the result in self._wb_weighted.
-
-        Notes:
-        - Applies only to numeric columns.
-        - Non-numeric columns, such as 'Night idx', are left unchanged.
-        - The mapping is by column order: factor[i] is applied to the i-th numeric column.
         """
         numeric_cols = self._master.select_dtypes(include="number").columns
 
@@ -639,11 +661,6 @@ class VibLog(Log):
     ) -> float:
         """
         Compute eVDV (estimated Vibration Dose Value) from a time history of RMS acceleration.
-
-        :param df: Series or dataframe containing RMS acceleration values.
-        :param t: Assessment interval in seconds.
-        :param col: Column to select when df is a dataframe.
-        :return: eVDV as a float.
         """
         if t is None:
             raise ValueError("Parameter 't' (measurement interval in seconds) is required.")
