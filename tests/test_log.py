@@ -11,6 +11,7 @@ from pycoustic.log import Log
 from pycoustic.survey import Survey
 from pycoustic.weather import WeatherHistory
 
+#pytest tests/test_log.py -v
 
 # --- Fixtures for generating temporary CSV data ---
 
@@ -413,6 +414,35 @@ def test_output_matches_provided_results():
             check_exact=True,
             obj=f"Mismatch in section {section}",
         )
+
+def test_as_interval_retains_spectral_columns_when_a_weighted_column_missing(tmp_path):
+    """Test that as_interval keeps spectral columns even when no A-weighted pivot column exists."""
+    csv_content = """Time,Leq 63,L90 4000,Lmax 2000
+2024/12/16 12:00,50.0,40.0,60.0
+2024/12/16 12:15,52.0,41.0,62.0
+2024/12/16 12:30,54.0,42.0,64.0
+2024/12/16 12:45,56.0,43.0,66.0
+"""
+    csv_path = tmp_path / "spectral_only.csv"
+    csv_path.write_text(csv_content)
+
+    log = Log(str(csv_path))
+    interval_data = log.as_interval(
+        t="1h",
+        leq_cols=[("Leq", 63.0), ("L90", 4000.0)],
+        max_pivots=[("Lmax", "A")],
+    )
+
+    assert not interval_data.empty
+    assert ("Night idx", "") in interval_data.columns
+
+    assert ("Leq", 63.0) in interval_data.columns
+    assert ("L90", 4000.0) in interval_data.columns
+    assert ("Lmax", 2000.0) in interval_data.columns
+
+    assert not interval_data[("Leq", 63.0)].isna().all()
+    assert not interval_data[("L90", 4000.0)].isna().all()
+    assert not interval_data[("Lmax", 2000.0)].isna().all()
 
 # --- 2. Survey Edge Cases ---
 

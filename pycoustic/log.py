@@ -296,10 +296,10 @@ class Log:
         combined = self._empty_like_columns(data.columns)
 
         for col in pivot_cols:
-            if col not in data.columns:
-                continue
-
             metric = col[0]
+            if col not in data.columns:
+                if metric not in data.columns.get_level_values(0):
+                    continue
 
             if hold_spectrum:
                 combined[metric] = data.resample(t)[metric].max()
