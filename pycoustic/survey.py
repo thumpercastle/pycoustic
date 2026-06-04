@@ -233,6 +233,8 @@ class Survey:
             day_t: str = "60min",
             evening_t: str = "60min",
             night_t: str = "15min",
+            include_all: bool = False,
+            all_t: str = "15min",
     ) -> pd.DataFrame:
         """
         Get a dataframe summarising modal values for each time period.
@@ -242,6 +244,8 @@ class Survey:
         :param day_t: Daytime averaging period.
         :param evening_t: Evening averaging period.
         :param night_t: Night-time averaging period.
+        :param include_all: If True, add an extra "All" column covering the whole survey.
+        :param all_t: Averaging period used for the all-periods calculation.
         :return: Dataframe of modal values.
         """
         if cols is None:
@@ -280,6 +284,16 @@ class Survey:
             pos_summary.append(nights)
             period_headers.append("Night-time")
 
+            if include_all:
+                period_headers.append("All")
+                all_modal = log.get_modal(
+                    data=log.as_interval(t=all_t),
+                    by_date=by_date,
+                    cols=cols,
+                )
+                all_modal.sort_index(inplace=True)
+                pos_summary.append(all_modal)
+
             pos_df = pd.concat(pos_summary, axis=1)
             pos_df = self._insert_multiindex(pos_df, super=key)
             combi = pd.concat([combi, pos_df], axis=0)
@@ -294,6 +308,8 @@ class Survey:
             day_t: str = "60min",
             evening_t: str = "60min",
             night_t: str = "15min",
+            include_all: bool = False,
+            all_t: str = "15min",
     ) -> pd.DataFrame:
         """
         Returns counts for each time period.
@@ -302,6 +318,8 @@ class Survey:
         :param day_t: Daytime averaging period.
         :param evening_t: Evening averaging period.
         :param night_t: Night-time averaging period.
+        :param include_all: If True, add an extra "All" column covering the whole survey.
+        :param all_t: Averaging period used for the all-periods calculation.
         :return: Dataframe of counts.
         """
         if cols is None:
@@ -330,6 +348,12 @@ class Survey:
             nights.sort_index(inplace=True)
             nights.name = "Night-time"
             pos_summary.append(nights)
+
+            if include_all:
+                all_counts = log.counts(data=log.as_interval(t=all_t), cols=cols)
+                all_counts.sort_index(inplace=True)
+                all_counts.name = "All"
+                pos_summary.append(all_counts)
 
             pos_df = pd.concat(pos_summary, axis=1)
             pos_df = pos_df.fillna(0).astype("int64")
