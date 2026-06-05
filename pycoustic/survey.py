@@ -235,6 +235,7 @@ class Survey:
             night_t: str = "15min",
             include_all: bool = False,
             all_t: str = "15min",
+            averaging: str = "log",
     ) -> pd.DataFrame:
         """
         Get a dataframe summarising modal values for each time period.
@@ -246,6 +247,8 @@ class Survey:
         :param night_t: Night-time averaging period.
         :param include_all: If True, add an extra "All" column covering the whole survey.
         :param all_t: Averaging period used for the all-periods calculation.
+        :param averaging: ``"log"`` for energy averaging (default); ``"arithmetic"`` for
+                          plain dB mean. Applied when resampling to the interval period.
         :return: Dataframe of modal values.
         """
         if cols is None:
@@ -258,7 +261,7 @@ class Survey:
             period_headers = ["Daytime"]
 
             days = log.get_modal(
-                data=log.get_period(data=log.as_interval(t=day_t), period="days"),
+                data=log.get_period(data=log.as_interval(t=day_t, averaging=averaging), period="days"),
                 by_date=by_date,
                 cols=cols,
             )
@@ -268,7 +271,7 @@ class Survey:
             if log.is_evening():
                 period_headers.append("Evening")
                 evenings = log.get_modal(
-                    data=log.get_period(data=log.as_interval(t=evening_t), period="evenings"),
+                    data=log.get_period(data=log.as_interval(t=evening_t, averaging=averaging), period="evenings"),
                     by_date=by_date,
                     cols=cols,
                 )
@@ -276,7 +279,7 @@ class Survey:
                 pos_summary.append(evenings)
 
             nights = log.get_modal(
-                data=log.get_period(data=log.as_interval(t=night_t), period="nights"),
+                data=log.get_period(data=log.as_interval(t=night_t, averaging=averaging), period="nights"),
                 by_date=by_date,
                 cols=cols,
             )
@@ -287,7 +290,7 @@ class Survey:
             if include_all:
                 period_headers.append("All")
                 all_modal = log.get_modal(
-                    data=log.as_interval(t=all_t),
+                    data=log.as_interval(t=all_t, averaging=averaging),
                     by_date=by_date,
                     cols=cols,
                 )
@@ -310,6 +313,7 @@ class Survey:
             night_t: str = "15min",
             include_all: bool = False,
             all_t: str = "15min",
+            averaging: str = "log",
     ) -> pd.DataFrame:
         """
         Returns counts for each time period.
@@ -320,6 +324,8 @@ class Survey:
         :param night_t: Night-time averaging period.
         :param include_all: If True, add an extra "All" column covering the whole survey.
         :param all_t: Averaging period used for the all-periods calculation.
+        :param averaging: ``"log"`` for energy averaging (default); ``"arithmetic"`` for
+                          plain dB mean. Applied when resampling to the interval period.
         :return: Dataframe of counts.
         """
         if cols is None:
@@ -330,27 +336,27 @@ class Survey:
         for key, log in self._logs.items():
             pos_summary = []
 
-            days = log.counts(data=log.get_period(data=log.as_interval(t=day_t), period="days"), cols=cols)
+            days = log.counts(data=log.get_period(data=log.as_interval(t=day_t, averaging=averaging), period="days"), cols=cols)
             days.sort_index(inplace=True)
             days.name = "Daytime"
             pos_summary.append(days)
 
             if log.is_evening():
                 evenings = log.counts(
-                    data=log.get_period(data=log.as_interval(t=evening_t), period="evenings"),
+                    data=log.get_period(data=log.as_interval(t=evening_t, averaging=averaging), period="evenings"),
                     cols=cols,
                 )
                 evenings.sort_index(inplace=True)
                 evenings.name = "Evening"
                 pos_summary.append(evenings)
 
-            nights = log.counts(data=log.get_period(data=log.as_interval(t=night_t), period="nights"), cols=cols)
+            nights = log.counts(data=log.get_period(data=log.as_interval(t=night_t, averaging=averaging), period="nights"), cols=cols)
             nights.sort_index(inplace=True)
             nights.name = "Night-time"
             pos_summary.append(nights)
 
             if include_all:
-                all_counts = log.counts(data=log.as_interval(t=all_t), cols=cols)
+                all_counts = log.counts(data=log.as_interval(t=all_t, averaging=averaging), cols=cols)
                 all_counts.sort_index(inplace=True)
                 all_counts.name = "All"
                 pos_summary.append(all_counts)
