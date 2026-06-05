@@ -1,12 +1,12 @@
 [tool.poetry]
 name = "pycoustic"
-version = "0.2.4"
+version = "0.2.7"
 description = ""
 authors = ["thumpercastle <tony.ryb@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.11, <=3.13"
+python = ">=3.12"
 pandas = "2.3.3"
 numpy = "2.3.3"
 openpyxl = "3.1.5"
