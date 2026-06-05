@@ -232,26 +232,33 @@ class Log:
             data: pd.DataFrame | None = None,
             t: str = "15min",
             cols: list[Any] | None = None,
+            averaging: str = "log",
     ) -> pd.DataFrame | None:
         """
         Recompute shorter Leq-style measurements as longer periods.
 
-        :param data: Input dataframe in antilog format.
+        :param data: Input dataframe. For ``averaging="log"`` pass antilogs; for
+                     ``averaging="arithmetic"`` pass raw dB values.
         :param t: Desired output period.
         :param cols: Columns to recompute.
+        :param averaging: ``"log"`` for energy (logarithmic) averaging (default);
+                          ``"arithmetic"`` for a plain arithmetic mean of dB values.
         :return: Recomputed dataframe or None.
         """
         if data is None:
-            data = self._antilogs
+            data = self._antilogs if averaging == "log" else self._master
         if cols is None:
             cols = ["Leq", "L90"]
 
         recomputed = self._empty_like_columns(data.columns)
         for idx in cols:
             if idx in data.columns:
-                recomputed[idx] = data[idx].resample(t).mean().apply(
-                    lambda x: self._db_from_antilog(x, self._decimals)
-                )
+                if averaging == "log":
+                    recomputed[idx] = data[idx].resample(t).mean().apply(
+                        lambda x: self._db_from_antilog(x, self._decimals)
+                    )
+                else:
+                    recomputed[idx] = data[idx].resample(t).mean().round(self._decimals)
         return self._none_if_zero(recomputed)
 
     def _recompute_night_idx(self, data: pd.DataFrame | None = None, t: str = "15min") -> pd.DataFrame | None:
@@ -410,6 +417,7 @@ class Log:
             leq_cols: list[Any] | None = None,
             max_pivots: list[tuple[Any, Any]] | None = None,
             hold_spectrum: bool = False,
+            averaging: str = "log",
     ) -> pd.DataFrame:
         """
         Return the data recomputed as longer time intervals.
@@ -420,8 +428,15 @@ class Log:
         :param leq_cols: Leq columns to include.
         :param max_pivots: Values used to pivot the Lmax recalculation.
         :param hold_spectrum: True for Lmax hold, False for Lmax event.
+        :param averaging: ``"log"`` (default) for energy (logarithmic) averaging of
+                          statistical levels such as L90; ``"arithmetic"`` for a plain
+                          arithmetic mean of dB values.
         :return: Recalculated dataframe.
         """
+        if averaging not in ("log", "arithmetic"):
+            raise ValueError(
+                f"Invalid averaging mode {averaging!r}. Must be 'log' or 'arithmetic'."
+            )
         if data is None:
             data = self._master
         if antilogs is None:
@@ -433,7 +448,8 @@ class Log:
 
         parts: list[pd.DataFrame] = []
 
-        leq = self._recompute_leq(data=antilogs, t=t, cols=leq_cols)
+        leq_data = antilogs if averaging == "log" else data
+        leq = self._recompute_leq(data=leq_data, t=t, cols=leq_cols, averaging=averaging)
         if leq is not None and not leq.empty:
             parts.append(leq)
 
@@ -476,7 +492,16 @@ class Log:
         if pivot_col not in data.columns:
             return pd.DataFrame()
 
-        nth = data.sort_values(by=pivot_col, ascending=not high)
+        # Use stable sort with the Night idx as a secondary key so that ties in the
+        # pivot column are always broken by time-of-night (earliest first), making
+        # the result deterministic across pandas/numpy versions.
+        nth = data.copy()
+        nth["_sort_idx"] = nth.index
+        nth = nth.sort_values(
+            by=[pivot_col, "_sort_idx"],
+            ascending=[not high, True],
+            kind="stable",
+        ).drop(columns=["_sort_idx"])
         nth["Time"] = nth.index.time
 
         if all_cols:

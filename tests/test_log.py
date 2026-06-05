@@ -444,6 +444,237 @@ def test_as_interval_retains_spectral_columns_when_a_weighted_column_missing(tmp
     assert not interval_data[("L90", 4000.0)].isna().all()
     assert not interval_data[("Lmax", 2000.0)].isna().all()
 
+
+# --- as_interval arithmetic averaging tests ---
+
+def test_as_interval_arithmetic_mean_matches_simple_average(tmp_path):
+    """Verify arithmetic averaging computes a plain mean of dB values, not an energy average."""
+    csv_content = """Time,L90 A
+2024/01/01 12:00,40.0
+2024/01/01 12:15,42.0
+2024/01/01 12:30,44.0
+2024/01/01 12:45,46.0
+"""
+    csv_path = tmp_path / "l90_arith.csv"
+    csv_path.write_text(csv_content)
+
+    log = Log(str(csv_path))
+
+    interval_arith = log.as_interval(
+        t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="arithmetic"
+    )
+    interval_log = log.as_interval(
+        t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="log"
+    )
+
+    arith_val = interval_arith[("L90", "A")].iloc[0]
+    log_val = interval_log[("L90", "A")].iloc[0]
+
+    # Arithmetic mean of 40, 42, 44, 46 = 43.0
+    assert abs(arith_val - 43.0) < 0.2, f"Expected 43.0, got {arith_val}"
+
+    # Log (energy) mean of the same values is always >= arithmetic mean
+    expected_log = round(10 * np.log10(np.mean([10 ** (x / 10) for x in [40.0, 42.0, 44.0, 46.0]])), 1)
+    assert abs(log_val - expected_log) < 0.2, f"Expected {expected_log}, got {log_val}"
+
+    # The two modes must differ for non-uniform inputs
+    assert log_val != arith_val
+
+
+def test_as_interval_arithmetic_mean_large_spread(tmp_path):
+    """With a large dB spread, energy average should be significantly higher than arithmetic average."""
+    csv_content = """Time,L90 A
+2024/01/01 12:00,30.0
+2024/01/01 12:15,50.0
+2024/01/01 12:30,30.0
+2024/01/01 12:45,50.0
+"""
+    csv_path = tmp_path / "l90_spread.csv"
+    csv_path.write_text(csv_content)
+
+    log = Log(str(csv_path))
+
+    interval_arith = log.as_interval(
+        t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="arithmetic"
+    )
+    interval_log = log.as_interval(
+        t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="log"
+    )
+
+    arith_val = interval_arith[("L90", "A")].iloc[0]
+    log_val = interval_log[("L90", "A")].iloc[0]
+
+    # Arithmetic mean of 30, 50, 30, 50 = 40.0
+    assert abs(arith_val - 40.0) < 0.2, f"Expected 40.0, got {arith_val}"
+
+    # Energy average is dominated by the 50 dB values; should be ~47 dB
+    expected_log = round(10 * np.log10(np.mean([10 ** (x / 10) for x in [30.0, 50.0, 30.0, 50.0]])), 1)
+    assert abs(log_val - expected_log) < 0.2, f"Expected {expected_log:.1f}, got {log_val}"
+
+    # Log mean must be substantially higher than arithmetic mean
+    assert log_val > arith_val + 5.0, (
+        f"Log mean ({log_val}) should be > 5 dB above arithmetic mean ({arith_val})"
+    )
+
+
+def test_as_interval_default_averaging_is_log(sample_csv_path):
+    """Default averaging mode must be logarithmic for backward compatibility."""
+    log = Log(sample_csv_path)
+
+    default_data = log.as_interval(t="1h", leq_cols=[("L90", "A")], max_pivots=[])
+    log_data = log.as_interval(t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="log")
+
+    if ("L90", "A") in default_data.columns and ("L90", "A") in log_data.columns:
+        pd.testing.assert_series_equal(
+            default_data[("L90", "A")].dropna(),
+            log_data[("L90", "A")].dropna(),
+            check_names=False,
+        )
+
+
+def test_as_interval_arithmetic_multiple_intervals(tmp_path):
+    """Arithmetic averaging must produce correct means for each resampled interval independently."""
+    csv_content = """Time,L90 A
+2024/01/01 12:00,40.0
+2024/01/01 12:15,42.0
+2024/01/01 12:30,44.0
+2024/01/01 12:45,46.0
+2024/01/01 13:00,50.0
+2024/01/01 13:15,52.0
+2024/01/01 13:30,54.0
+2024/01/01 13:45,56.0
+"""
+    csv_path = tmp_path / "l90_multi.csv"
+    csv_path.write_text(csv_content)
+
+    log = Log(str(csv_path))
+
+    interval_data = log.as_interval(
+        t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="arithmetic"
+    )
+
+    assert not interval_data.empty
+    assert ("L90", "A") in interval_data.columns
+
+    vals = interval_data[("L90", "A")].dropna()
+    assert len(vals) == 2
+
+    # 12:00–12:45 → mean(40, 42, 44, 46) = 43.0
+    assert abs(vals.iloc[0] - 43.0) < 0.2, f"First interval: expected 43.0, got {vals.iloc[0]}"
+    # 13:00–13:45 → mean(50, 52, 54, 56) = 53.0
+    assert abs(vals.iloc[1] - 53.0) < 0.2, f"Second interval: expected 53.0, got {vals.iloc[1]}"
+
+
+def test_as_interval_arithmetic_with_nan_values(tmp_path):
+    """Arithmetic averaging must skip NaN values without crashing."""
+    csv_content = """Time,L90 A
+2024/01/01 12:00,40.0
+2024/01/01 12:15,
+2024/01/01 12:30,44.0
+2024/01/01 12:45,46.0
+"""
+    csv_path = tmp_path / "l90_nan.csv"
+    csv_path.write_text(csv_content)
+
+    log = Log(str(csv_path))
+
+    interval_data = log.as_interval(
+        t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="arithmetic"
+    )
+
+    assert not interval_data.empty
+    assert ("L90", "A") in interval_data.columns
+
+    val = interval_data[("L90", "A")].dropna().iloc[0]
+    # mean(40, 44, 46) ignoring NaN = 43.33...
+    assert abs(val - round((40.0 + 44.0 + 46.0) / 3, 1)) < 0.2
+
+
+def test_as_interval_arithmetic_single_value_equals_value(tmp_path):
+    """For a single-row interval, arithmetic average should return that value unchanged."""
+    csv_content = """Time,L90 A
+2024/01/01 12:00,45.0
+"""
+    csv_path = tmp_path / "l90_single.csv"
+    csv_path.write_text(csv_content)
+
+    log = Log(str(csv_path))
+
+    interval_data = log.as_interval(
+        t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="arithmetic"
+    )
+
+    assert not interval_data.empty
+    val = interval_data[("L90", "A")].dropna().iloc[0]
+    assert abs(val - 45.0) < 0.2
+
+
+def test_as_interval_arithmetic_spectral_l90(tmp_path):
+    """Arithmetic averaging must work correctly for spectral L90 columns."""
+    csv_content = """Time,L90 125,L90 250,L90 500
+2024/01/01 12:00,30.0,35.0,40.0
+2024/01/01 12:15,32.0,37.0,42.0
+2024/01/01 12:30,34.0,39.0,44.0
+2024/01/01 12:45,36.0,41.0,46.0
+"""
+    csv_path = tmp_path / "l90_spectral.csv"
+    csv_path.write_text(csv_content)
+
+    log = Log(str(csv_path))
+
+    interval_data = log.as_interval(
+        t="1h",
+        leq_cols=[("L90", 125.0), ("L90", 250.0), ("L90", 500.0)],
+        max_pivots=[],
+        averaging="arithmetic",
+    )
+
+    assert not interval_data.empty
+
+    assert abs(interval_data[("L90", 125.0)].iloc[0] - 33.0) < 0.2  # mean(30,32,34,36)
+    assert abs(interval_data[("L90", 250.0)].iloc[0] - 38.0) < 0.2  # mean(35,37,39,41)
+    assert abs(interval_data[("L90", 500.0)].iloc[0] - 43.0) < 0.2  # mean(40,42,44,46)
+
+
+def test_as_interval_invalid_averaging_raises_value_error(sample_csv_path):
+    """An unrecognised averaging mode must raise ValueError."""
+    log = Log(sample_csv_path)
+
+    with pytest.raises(ValueError, match="averaging"):
+        log.as_interval(
+            t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="geometric"
+        )
+
+
+def test_as_interval_arithmetic_preserves_lmax_and_night_idx(tmp_path):
+    """Arithmetic averaging must not affect Lmax computation or Night idx column."""
+    csv_content = """Time,L90 A,Lmax A
+2024/01/01 12:00,40.0,65.0
+2024/01/01 12:15,42.0,67.0
+2024/01/01 12:30,44.0,70.0
+2024/01/01 12:45,46.0,63.0
+"""
+    csv_path = tmp_path / "l90_lmax.csv"
+    csv_path.write_text(csv_content)
+
+    log = Log(str(csv_path))
+
+    interval_data = log.as_interval(
+        t="1h",
+        leq_cols=[("L90", "A")],
+        max_pivots=[("Lmax", "A")],
+        averaging="arithmetic",
+    )
+
+    assert not interval_data.empty
+    assert ("Night idx", "") in interval_data.columns
+    assert ("L90", "A") in interval_data.columns
+    assert ("Lmax", "A") in interval_data.columns
+
+    # Lmax is still the maximum, not an average
+    assert interval_data[("Lmax", "A")].iloc[0] == 70.0
+
+
 # --- 2. Survey Edge Cases ---
 
 def test_survey_empty_operations():
