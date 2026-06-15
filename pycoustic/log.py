@@ -500,16 +500,21 @@ class Log:
             pivot_col: tuple[Any, Any] | None = None,
             all_cols: bool = False,
             high: bool = True,
+            count: int = 1,
+            group_by_date: bool = True,
     ) -> pd.DataFrame:
         """
         Return the nth-highest or nth-lowest values for the specified parameter.
 
-        :param n: The rank to return.
+        :param n: The rank to start from (1-indexed).
         :param data: Input dataframe.
         :param pivot_col: Column used for ranking.
-        :param all_cols: If True, return all columns for the selected row.
+        :param all_cols: If True, return all columns for the selected rows.
         :param high: True for highest values, False for lowest.
-        :return: Dataframe of nth-ranked values.
+        :param count: Number of consecutive rows to return starting from rank n.
+        :param group_by_date: If True, group by date and return per-date results.
+                              If False, treat the entire dataset as one group.
+        :return: Dataframe of ranked values.
         """
         if data is None:
             data = self._master
@@ -519,7 +524,7 @@ class Log:
         if pivot_col not in data.columns:
             return pd.DataFrame()
 
-        # Use stable sort with the Night idx as a secondary key so that ties in the
+        # Use stable sort with the index as a secondary key so that ties in the
         # pivot column are always broken by time-of-night (earliest first), making
         # the result deterministic across pandas/numpy versions.
         nth = data.copy()
@@ -531,9 +536,17 @@ class Log:
         ).drop(columns=["_sort_idx"])
         nth["Time"] = nth.index.time
 
-        if all_cols:
-            return nth.groupby(by=nth.index.date).nth(n - 1)
-        return nth[[pivot_col[0], "Time"]].groupby(by=nth.index.date).nth(n - 1)
+        # Build the list of 0-indexed rows to select: start from rank n-1
+        rows = list(range(n - 1, n - 1 + count))
+
+        if group_by_date:
+            if all_cols:
+                return nth.groupby(by=nth.index.date).nth(rows)
+            return nth[[pivot_col[0], "Time"]].groupby(by=nth.index.date).nth(rows)
+        else:
+            if all_cols:
+                return nth.iloc[rows]
+            return nth[[pivot_col[0], "Time"]].iloc[rows]
 
     def get_modal(
             self,
