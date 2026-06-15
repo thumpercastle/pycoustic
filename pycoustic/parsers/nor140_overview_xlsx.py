@@ -66,8 +66,6 @@ class Nor140OverviewXlsxParser(BaseLogParser):
                 cleaned = [str(v).strip() for v in row_values if pd.notna(v) and str(v).strip()]
                 if "File" in cleaned and "Date" in cleaned:
                     return True
-                if cls._looks_like_header_row(row_values):
-                    return True
 
         return False
 
