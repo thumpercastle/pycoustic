@@ -150,6 +150,7 @@ class Survey:
             max_cols: list[Any] | None = None,
             lmax_n: int = 10,
             lmax_t: str = "2min",
+            pivot_col: tuple[Any, Any] | None = None,
     ) -> pd.DataFrame:
         """
         Get a dataframe summarising the parameters relevant to assessment of internal
@@ -170,6 +171,10 @@ class Survey:
             leq_cols = [("Leq", "A")]
         if max_cols is None:
             max_cols = [("Lmax", "A")]
+
+        # Derive pivot from max_cols if not explicitly given
+        if pivot_col is None and max_cols:
+            pivot_col = max_cols[0]
 
         for key, lg in self._logs.items():
             period_blocks: list[pd.DataFrame | pd.Series] = []
@@ -202,7 +207,7 @@ class Survey:
 
             maxes = lg.as_interval(t=lmax_t)
             maxes = lg.get_period(data=maxes, period="nights", night_idx=True)
-            max_df = lg.get_nth_high_low(n=lmax_n, data=maxes)
+            max_df = lg.get_nth_high_low(n=lmax_n, data=maxes, pivot_col=pivot_col)
 
             existing_max_cols = self._existing_columns(max_df, max_cols)
             maxes = max_df[existing_max_cols] if existing_max_cols else pd.DataFrame(index=max_df.index)
@@ -371,7 +376,7 @@ class Survey:
         combi.index.name = "dB"
         return combi
 
-    def lmax_spectra(self, n: int = 10, t: str = "2min", period: str = "nights") -> pd.DataFrame:
+    def lmax_spectra(self, n: int = 10, t: str = "2min", period: str = "nights", pivot_col: tuple[Any, Any] | None = None) -> pd.DataFrame:
         """
         Get spectral data for the nth-highest Lmax values during a given time period.
 
@@ -380,6 +385,7 @@ class Survey:
         :param n: Nth-highest Lmax.
         :param t: Time period over which to compute nth-highest Lmax values.
         :param period: "days", "evenings" or "nights".
+        :param pivot_col: Column used for ranking (default: ("Lmax", "A")).
         :return: Dataframe of nth-highest Lmax Event spectra.
         """
         combi = pd.DataFrame()
@@ -387,7 +393,9 @@ class Survey:
         for key, log in self._logs.items():
             combined_list = []
 
-            max_df = log.get_nth_high_low(n=n, data=log.get_period(data=log.as_interval(t=t), period=period))
+            if pivot_col is None:
+                pivot_col = ("Lmax", "A")
+            max_df = log.get_nth_high_low(n=n, data=log.get_period(data=log.as_interval(t=t), period=period), pivot_col=pivot_col)
             existing_cols = [c for c in ["Lmax", "Time"] if c in max_df.columns]
             maxes = max_df[existing_cols] if existing_cols else pd.DataFrame()
 
