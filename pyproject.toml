@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pycoustic"
-version = "0.3.0"
+version = "0.4.0"
 description = ""
 authors = ["thumpercastle <tony.ryb@gmail.com>"]
 readme = "README.md"
