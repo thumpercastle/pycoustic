@@ -146,6 +146,17 @@ class Log:
         return np.round((10 * np.log10(value)), decimals)
 
     @staticmethod
+    def _is_ln_column(col_name: str | tuple[Any, Any]) -> bool:
+        """Check if a column represents an Ln-type metric (L90, L10, etc.).
+
+        Accepts both string level keys (``"L90"``) and tuple column references
+        (``("L90", "A")``).
+        """
+        if isinstance(col_name, tuple):
+            col_name = col_name[0]
+        return bool(col_name.startswith("L") and col_name[1:].isdigit())
+
+    @staticmethod
     def _empty_like_columns(columns: Any) -> pd.DataFrame:
         return pd.DataFrame(columns=columns)
 
@@ -260,6 +271,7 @@ class Log:
             t: str = "15min",
             cols: list[Any] | None = None,
             averaging: str = "log",
+            ln_averaging: str = "arithmetic",
     ) -> pd.DataFrame | None:
         """
         Recompute shorter Leq-style measurements as longer periods.
@@ -270,6 +282,10 @@ class Log:
         :param cols: Columns to recompute.
         :param averaging: ``"log"`` for energy (logarithmic) averaging (default);
                           ``"arithmetic"`` for a plain arithmetic mean of dB values.
+        :param ln_averaging: Averaging method for Ln-type columns (L90, L10, etc.).
+                             ``"arithmetic"`` (default) — always uses arithmetic mean
+                             of raw dB values. ``"log"`` — uses the same method as
+                             the global ``averaging`` parameter.
         :return: Recomputed dataframe or None.
         """
         if data is None:
@@ -280,7 +296,11 @@ class Log:
         recomputed = self._empty_like_columns(data.columns)
         for idx in cols:
             if idx in data.columns:
-                if averaging == "log":
+                # Ln columns (L90, L10, etc.) default to arithmetic mean of dB
+                # to avoid physically-meaningless energy averaging of percentiles
+                if self._is_ln_column(idx) and ln_averaging == "arithmetic":
+                    recomputed[idx] = self._master[idx].resample(t).mean().round(self._decimals)
+                elif averaging == "log":
                     recomputed[idx] = data[idx].resample(t).mean().apply(
                         lambda x: self._db_from_antilog(x, self._decimals)
                     )
@@ -445,6 +465,7 @@ class Log:
             max_pivots: list[tuple[Any, Any]] | None = None,
             hold_spectrum: bool = False,
             averaging: str = "log",
+            ln_averaging: str = "arithmetic",
     ) -> pd.DataFrame:
         """
         Return the data recomputed as longer time intervals.
@@ -456,8 +477,12 @@ class Log:
         :param max_pivots: Values used to pivot the Lmax recalculation.
         :param hold_spectrum: True for Lmax hold, False for Lmax event.
         :param averaging: ``"log"`` (default) for energy (logarithmic) averaging of
-                          statistical levels such as L90; ``"arithmetic"`` for a plain
-                          arithmetic mean of dB values.
+                          Leq-type columns; ``"arithmetic"`` for a plain arithmetic
+                          mean of dB values.
+        :param ln_averaging: Averaging method for Ln-type columns (L90, L10, etc.).
+                             ``"arithmetic"`` (default) — always arithmetic mean of
+                             raw dB values. ``"log"`` — uses the same method as
+                             ``averaging``.
         :return: Recalculated dataframe.
         """
         if averaging not in ("log", "arithmetic"):
@@ -476,7 +501,7 @@ class Log:
         parts: list[pd.DataFrame] = []
 
         leq_data = antilogs if averaging == "log" else data
-        leq = self._recompute_leq(data=leq_data, t=t, cols=leq_cols, averaging=averaging)
+        leq = self._recompute_leq(data=leq_data, t=t, cols=leq_cols, averaging=averaging, ln_averaging=ln_averaging)
         if leq is not None and not leq.empty:
             parts.append(leq)
 
@@ -500,16 +525,21 @@ class Log:
             pivot_col: tuple[Any, Any] | None = None,
             all_cols: bool = False,
             high: bool = True,
+            count: int = 1,
+            group_by_date: bool = True,
     ) -> pd.DataFrame:
         """
         Return the nth-highest or nth-lowest values for the specified parameter.
 
-        :param n: The rank to return.
+        :param n: The rank to start from (1-indexed).
         :param data: Input dataframe.
         :param pivot_col: Column used for ranking.
-        :param all_cols: If True, return all columns for the selected row.
+        :param all_cols: If True, return all columns for the selected rows.
         :param high: True for highest values, False for lowest.
-        :return: Dataframe of nth-ranked values.
+        :param count: Number of consecutive rows to return starting from rank n.
+        :param group_by_date: If True, group by date and return per-date results.
+                              If False, treat the entire dataset as one group.
+        :return: Dataframe of ranked values.
         """
         if data is None:
             data = self._master
@@ -519,7 +549,7 @@ class Log:
         if pivot_col not in data.columns:
             return pd.DataFrame()
 
-        # Use stable sort with the Night idx as a secondary key so that ties in the
+        # Use stable sort with the index as a secondary key so that ties in the
         # pivot column are always broken by time-of-night (earliest first), making
         # the result deterministic across pandas/numpy versions.
         nth = data.copy()
@@ -531,9 +561,21 @@ class Log:
         ).drop(columns=["_sort_idx"])
         nth["Time"] = nth.index.time
 
-        if all_cols:
-            return nth.groupby(by=nth.index.date).nth(n - 1)
-        return nth[[pivot_col[0], "Time"]].groupby(by=nth.index.date).nth(n - 1)
+        # Build the list of 0-indexed rows to select: start from rank n-1
+        rows = list(range(n - 1, n - 1 + count))
+
+        if group_by_date:
+            if all_cols:
+                return nth.groupby(by=nth.index.date).nth(rows)
+            return nth[[pivot_col[0], "Time"]].groupby(by=nth.index.date).nth(rows)
+        else:
+            # Clamp to available rows -- same graceful behaviour as groupby.nth
+            if not rows or min(rows) >= len(nth):
+                return pd.DataFrame()
+            rows = [r for r in rows if r < len(nth)]
+            if all_cols:
+                return nth.iloc[rows]
+            return nth[[pivot_col[0], "Time"]].iloc[rows]
 
     def get_modal(
             self,
