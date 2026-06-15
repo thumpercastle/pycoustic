@@ -5,6 +5,7 @@ import pandas as pd
 
 from .base import BaseLogParser
 from .nor140_overview_xlsx import Nor140OverviewXlsxParser
+from .nor145_multi_th import Nor145MultipleTHParser
 
 
 class ParserRegistry:
@@ -52,3 +53,4 @@ class ParserRegistry:
 
 default_registry = ParserRegistry()
 default_registry.register(Nor140OverviewXlsxParser)
+default_registry.register(Nor145MultipleTHParser)

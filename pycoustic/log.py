@@ -98,6 +98,33 @@ class Log:
             self._master = default_registry.parse(path)
 
         self._finalise_loaded_master()
+    @classmethod
+    def from_dataframe(
+        cls,
+        df,
+        *,
+        filepath: str = '',
+        name: str = '',
+    ) -> "Log":
+        """Create a Log directly from a pre-parsed DataFrame.
+
+        The DataFrame must have a DatetimeIndex and flat string column
+        names in pycoustic format (e.g. "Leq A").
+
+        :param df: Parsed data with DatetimeIndex and flat column names.
+        :param filepath: Optional source identifier (stored, not read).
+        :param name: Optional position name.
+        :returns: A fully initialised Log.
+        """
+        log = cls.__new__(cls)
+        log._filepath = filepath or name
+        log._night_start = None
+        log._day_start = None
+        log._evening_start = None
+        log._decimals = 1
+        log._master = df.copy()
+        log._finalise_loaded_master()
+        return log
 
     @staticmethod
     def _read_preformatted_csv(path: str) -> pd.DataFrame:
