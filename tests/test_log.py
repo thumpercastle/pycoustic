@@ -885,6 +885,186 @@ def test_survey_broadband_summary_handles_logs_with_no_leq_or_lmax(tmp_path):
 
 
 
+# --- 2c. Log.get_nth_high_low — count, group_by_date ---
+
+@pytest.fixture
+def rich_sample_csv_path():
+    """Data with multiple rows per date for granular nth_high_low testing."""
+    content = """Time,Leq A,Lmax A,Lmax C,Leq 125
+2024-12-16 22:45,50.0,60.0,65.0,55.0
+2024-12-16 23:00,48.0,58.0,63.0,53.0
+2024-12-16 23:15,45.0,55.0,60.0,50.0
+2024-12-17 00:00,40.0,50.0,55.0,45.0
+2024-12-17 06:45,42.0,52.0,58.0,48.0
+2024-12-17 07:00,55.0,65.0,70.0,60.0
+2024-12-17 07:15,58.0,68.0,72.0,62.0
+"""
+    fd, path = tempfile.mkstemp(suffix=".csv")
+    with os.fdopen(fd, "w") as f:
+        f.write(content)
+    yield path
+    os.remove(path)
+
+
+def test_nth_high_low_default_behaviour(sample_csv_path):
+    """Default args (count=1, group_by_date=True) preserve original behaviour — one row per date."""
+    log = Log(sample_csv_path)
+    result = log.get_nth_high_low(n=1, pivot_col=("Lmax", "A"))
+    # One row per date: highest Lmax A per date = 60.0 (12-16), 68.0 (12-17)
+    assert len(result) == 2
+    dates = set(result.index.date)
+    assert dt.date(2024, 12, 16) in dates
+    assert dt.date(2024, 12, 17) in dates
+    vals = result[("Lmax", "A")].tolist()
+    assert 60.0 in vals
+    assert 68.0 in vals
+
+
+def test_nth_high_low_count_multiple_per_date(rich_sample_csv_path):
+    """count=3 returns the top 3 ranked rows for each date group."""
+    log = Log(rich_sample_csv_path)
+    result = log.get_nth_high_low(n=1, count=3, pivot_col=("Lmax", "A"))
+    # 2024-12-16 has 3 rows total: returns 3 rows; 2024-12-17 has 4 rows: returns 3 rows
+    assert len(result) == 6  # 3 per date × 2 dates
+    per_date = result.groupby(result.index.date)
+    assert len(per_date) == 2
+    for date, group in per_date:
+        assert len(group) == 3
+        # Within each date, values should be descending
+        vals = group[("Lmax", "A")].tolist()
+        assert vals == sorted(vals, reverse=True), f"Values not descending for {date}: {vals}"
+
+
+def test_nth_high_low_count_smaller_than_available(rich_sample_csv_path):
+    """count larger than the number of rows in a date returns all available rows for that date."""
+    log = Log(rich_sample_csv_path)
+    result = log.get_nth_high_low(n=1, count=10, pivot_col=("Lmax", "A"))
+    # 2024-12-16 has 3 rows, 2024-12-17 has 4 rows — count=10 returns all available
+    assert len(result) == 7  # total rows in dataset
+    vals = result[("Lmax", "A")].tolist()
+    assert vals[0] == 68.0  # highest overall (2024-12-17 rank 1)
+    assert vals[-1] == 50.0  # lowest overall (2024-12-17 rank 4)
+
+
+def test_nth_high_low_group_by_date_false_all_rows(rich_sample_csv_path):
+    """group_by_date=False returns overall ranking with no date grouping, count returns global rows."""
+    log = Log(rich_sample_csv_path)
+    result = log.get_nth_high_low(n=1, count=3, pivot_col=("Lmax", "A"), group_by_date=False)
+    assert len(result) == 3  # top 3 overall
+    expected = [68.0, 65.0, 60.0]  # highest 3 Lmax A values globally
+    actual = result[("Lmax", "A")].tolist()
+    assert actual == expected, f"Expected {expected}, got {actual}"
+
+
+def test_nth_high_low_group_by_date_false_offset(rich_sample_csv_path):
+    """group_by_date=False with n>1 returns lower-ranked rows overall."""
+    log = Log(rich_sample_csv_path)
+    result = log.get_nth_high_low(n=3, count=2, pivot_col=("Lmax", "A"), group_by_date=False)
+    assert len(result) == 2  # 3rd and 4th overall
+    expected = [60.0, 58.0]  # 3rd=60.0 (at 22:45 on 12-16), 4th=58.0 (at 23:00 on 12-16)
+    actual = result[("Lmax", "A")].tolist()
+    assert actual == expected, f"Expected {expected}, got {actual}"
+
+
+def test_nth_high_low_high_false_with_count(rich_sample_csv_path):
+    """high=False with count returns multiple lowest-ranked rows."""
+    log = Log(rich_sample_csv_path)
+    result = log.get_nth_high_low(
+        n=1, count=3, pivot_col=("Lmax", "A"), high=False, group_by_date=False
+    )
+    assert len(result) == 3
+    expected = [50.0, 52.0, 55.0]  # 3 lowest Lmax A globally
+    actual = result[("Lmax", "A")].tolist()
+    assert actual == expected, f"Expected {expected}, got {actual}"
+
+
+def test_nth_high_low_high_false_grouped_with_count(rich_sample_csv_path):
+    """high=False with count and group_by_date=True returns multiple lowest per date."""
+    log = Log(rich_sample_csv_path)
+    result = log.get_nth_high_low(n=1, count=2, pivot_col=("Lmax", "A"), high=False)
+    # 2 lowest per date: 2024-12-16 → (55.0, 58.0), 2024-12-17 → (50.0, 52.0)
+    assert len(result) == 4  # 2 per date × 2 dates
+    per_date = result.groupby(result.index.date)
+    for date, group in per_date:
+        vals = group[("Lmax", "A")].tolist()
+        assert vals == sorted(vals), f"Values not ascending for {date}: {vals}"
+
+
+def test_nth_high_low_pivot_spectral_with_count(rich_sample_csv_path):
+    """Spectral pivot column (Leq 125) with count and group_by_date=False returns Leq columns."""
+    log = Log(rich_sample_csv_path)
+    result = log.get_nth_high_low(
+        n=1, count=2, pivot_col=("Leq", 125.0), group_by_date=False
+    )
+    assert len(result) == 2
+    # Top 2 Leq 125 values overall: 62.0 (07:15 on 12-17), 60.0 (07:00 on 12-17)
+    assert result[("Leq", 125.0)].iloc[0] == 62.0
+    assert result[("Leq", 125.0)].iloc[1] == 60.0
+    # Should return all Leq columns (first level matches "Leq")
+    assert ("Leq", "A") in result.columns
+
+
+def test_nth_high_low_pivot_lmax_c_with_count(rich_sample_csv_path):
+    """Lmax C pivot with count returns all Lmax columns from matching timestamps."""
+    log = Log(rich_sample_csv_path)
+    result = log.get_nth_high_low(
+        n=1, count=3, pivot_col=("Lmax", "C"), group_by_date=True
+    )
+    # Top 3 per date by Lmax C
+    assert len(result) == 6  # 3 per date × 2 dates
+    # Should return all Lmax columns
+    assert ("Lmax", "A") in result.columns
+    assert ("Lmax", "C") in result.columns
+    assert ("Time", "") in result.columns
+
+
+def test_nth_high_low_all_cols_with_group_by_date_false(rich_sample_csv_path):
+    """all_cols=True + group_by_date=False returns all data columns."""
+    log = Log(rich_sample_csv_path)
+    result = log.get_nth_high_low(
+        n=1, count=2, pivot_col=("Lmax", "A"), all_cols=True, group_by_date=False
+    )
+    assert len(result) == 2
+    # Should have all original columns including those not in the pivot family
+    assert ("Leq", "A") in result.columns
+    assert ("Leq", 125.0) in result.columns
+    assert ("Lmax", "A") in result.columns
+    assert ("Lmax", "C") in result.columns
+
+
+def test_nth_high_low_n_greater_than_available_returns_empty(rich_sample_csv_path):
+    """n exceeding available rows returns an empty DataFrame."""
+    log = Log(rich_sample_csv_path)
+    result = log.get_nth_high_low(n=999, pivot_col=("Lmax", "A"), group_by_date=False)
+    assert result.empty
+
+
+def test_nth_high_low_missing_pivot_returns_empty(rich_sample_csv_path):
+    """Missing pivot column returns empty DataFrame regardless of new params."""
+    log = Log(rich_sample_csv_path)
+    result = log.get_nth_high_low(
+        n=1, count=3, pivot_col=("L90", "A"), group_by_date=False
+    )
+    assert result.empty
+
+
+def test_nth_high_low_count_returns_correct_values(rich_sample_csv_path):
+    """Verify exact values returned for a specific known case."""
+    log = Log(rich_sample_csv_path)
+    # 2nd and 3rd highest Lmax A per date, grouped
+    result = log.get_nth_high_low(n=2, count=2, pivot_col=("Lmax", "A"))
+    # 2024-12-16: ranks 2 (58.0) and 3 (55.0) = the last 2 rows for that date
+    # 2024-12-17: ranks 2 (65.0) and 3 (52.0) = mid 2 rows
+    dec16 = result.loc[result.index.date == dt.date(2024, 12, 16)]
+    assert len(dec16) == 2
+    assert dec16[("Lmax", "A")].iloc[0] == 58.0
+    assert dec16[("Lmax", "A")].iloc[1] == 55.0
+    dec17 = result.loc[result.index.date == dt.date(2024, 12, 17)]
+    assert len(dec17) == 2
+    assert dec17[("Lmax", "A")].iloc[0] == 65.0
+    assert dec17[("Lmax", "A")].iloc[1] == 52.0
+
+
 # --- 3. WeatherHistory Edge Cases ---
 
 @patch("requests.get")

@@ -544,6 +544,10 @@ class Log:
                 return nth.groupby(by=nth.index.date).nth(rows)
             return nth[[pivot_col[0], "Time"]].groupby(by=nth.index.date).nth(rows)
         else:
+            # Clamp to available rows -- same graceful behaviour as groupby.nth
+            if not rows or min(rows) >= len(nth):
+                return pd.DataFrame()
+            rows = [r for r in rows if r < len(nth)]
             if all_cols:
                 return nth.iloc[rows]
             return nth[[pivot_col[0], "Time"]].iloc[rows]
