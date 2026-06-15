@@ -464,7 +464,7 @@ def test_as_interval_arithmetic_mean_matches_simple_average(tmp_path):
         t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="arithmetic"
     )
     interval_log = log.as_interval(
-        t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="log"
+        t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="log", ln_averaging="log"
     )
 
     arith_val = interval_arith[("L90", "A")].iloc[0]
@@ -498,7 +498,7 @@ def test_as_interval_arithmetic_mean_large_spread(tmp_path):
         t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="arithmetic"
     )
     interval_log = log.as_interval(
-        t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="log"
+        t="1h", leq_cols=[("L90", "A")], max_pivots=[], averaging="log", ln_averaging="log"
     )
 
     arith_val = interval_arith[("L90", "A")].iloc[0]
