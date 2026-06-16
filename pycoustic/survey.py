@@ -405,52 +405,56 @@ class Survey:
         return combi.round(decimals=DECIMALS)
 
     def peak_picker(
-            self,
-            log_name: str,
-            pivot_col: tuple[Any, Any],
-            k: int = 5,
-            high: bool = True,
-    ) -> tuple[pd.DataFrame, pd.Series]:
-        """
-        Find the K highest or K lowest values of a pivot column in a single Log,
-        returning both the peak spectra and the full time history for plotting.
+                self,
+                log_name: str,
+                pivot_col: tuple[Any, Any],
+                k: int = 5,
+                high: bool = True,
+                exclusion_zone_s: float = 0,
+        ) -> tuple[pd.DataFrame, pd.Series]:
+            """
+            Find the K highest or K lowest values of a pivot column in a single Log,
+            returning both the peak spectra and the full time history for plotting.
 
-        :param log_name: Name of the Log (as passed to ``add_log``).
-        :param pivot_col: Column to rank by, e.g. ``("Lmax", "A")``.
-        :param k: Number of peaks to return.
-        :param high: ``True`` (default) for highest values, ``False`` for lowest.
-        :return: Tuple of (peaks_df, time_history).
-                 ``peaks_df`` has all spectral columns for the K highest/lowest rows.
-                 ``time_history`` is a Series of the pivot column across all timestamps.
-        :raises KeyError: If ``log_name`` is not found in the Survey.
-        """
-        if log_name not in self._logs:
-            raise KeyError(
-                f"Log {log_name!r} not found in survey. "
-                f"Available logs: {list(self._logs.keys())}"
+            :param log_name: Name of the Log (as passed to ``add_log``).
+            :param pivot_col: Column to rank by, e.g. ``("Lmax", "A")``.
+            :param k: Number of peaks to return.
+            :param high: ``True`` (default) for highest values, ``False`` for lowest.
+            :param exclusion_zone_s: If > 0, no two selected peaks can be within this
+                                     many seconds of each other (greedy selection).
+            :return: Tuple of (peaks_df, time_history).
+                     ``peaks_df`` has all spectral columns for the K highest/lowest rows.
+                     ``time_history`` is a Series of the pivot column across all timestamps.
+            :raises KeyError: If ``log_name`` is not found in the Survey.
+            """
+            if log_name not in self._logs:
+                raise KeyError(
+                    f"Log {log_name!r} not found in survey. "
+                    f"Available logs: {list(self._logs.keys())}"
+                )
+
+            log = self._logs[log_name]
+            data = log.get_data()
+
+            if pivot_col not in data.columns:
+                return pd.DataFrame(), pd.Series(dtype=float, name=pivot_col)
+
+            # Full time history for plotting
+            time_history = data[pivot_col].copy()
+            time_history.name = pivot_col
+
+            # K highest/lowest spectra
+            peaks_df = log.get_nth_high_low(
+                n=1,
+                count=k,
+                pivot_col=pivot_col,
+                all_cols=True,
+                group_by_date=False,
+                high=high,
+                exclusion_zone_s=exclusion_zone_s,
             )
 
-        log = self._logs[log_name]
-        data = log.get_data()
-
-        if pivot_col not in data.columns:
-            return pd.DataFrame(), pd.Series(dtype=float, name=pivot_col)
-
-        # Full time history for plotting
-        time_history = data[pivot_col].copy()
-        time_history.name = pivot_col
-
-        # K highest/lowest spectra
-        peaks_df = log.get_nth_high_low(
-            n=1,
-            count=k,
-            pivot_col=pivot_col,
-            all_cols=True,
-            group_by_date=False,
-            high=high,
-        )
-
-        return peaks_df, time_history
+            return peaks_df, time_history
 
     def leq_spectra(self, leq_cols: list[Any] | None = None) -> pd.DataFrame:
         """

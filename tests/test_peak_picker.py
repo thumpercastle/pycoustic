@@ -151,3 +151,64 @@ def test_peak_picker_spectral_pivot(survey_with_logs):
 
     # Should return all Leq columns (first level matches "Leq")
     assert ("Leq", "A") in peaks_df.columns
+
+
+def test_peak_picker_exclusion_zone_skips_adjacent_peaks(survey_with_logs):
+    """peak_picker with exclusion_zone_s skips peaks within the time window
+    of a higher-ranked peak, picking the next-best value outside the zone."""
+    peaks_df, _ = survey_with_logs.peak_picker(
+        log_name="PosA",
+        pivot_col=("Lmax", "A"),
+        k=3,
+        high=True,
+        exclusion_zone_s=900,  # 15 min — skip rows within 15 min of each peak
+    )
+
+    # PosA data has 15-minute intervals. With exclusion_zone_s=900 (15 min):
+    #   - Top Lmax A = 68.0 at 2024-12-17 07:15
+    #   - Next: 65.0 at 07:00 — within 15 min of 68.0, SKIP
+    #   - Next: 60.0 at 2024-12-16 22:45 — outside 15 min of 07:15 (different dates), PICK
+    #   - Next: 58.0 at 23:00 — within 15 min of 60.0 (22:45), SKIP
+    #   - Next: 55.0 at 23:15 — outside 15 min of 22:45, PICK
+    # Result: 3 peaks — 68.0, 60.0, 55.0
+    assert len(peaks_df) == 3
+    pivot_vals = peaks_df[("Lmax", "A")].tolist()
+    assert pivot_vals == [68.0, 60.0, 55.0], (
+        f"Expected [68.0, 60.0, 55.0] with exclusion_zone_s=900, got {pivot_vals}"
+    )
+
+
+def test_peak_picker_exclusion_zone_zero_is_noop(survey_with_logs):
+    """exclusion_zone_s=0 (default) should behave identically to no exclusion zone."""
+    peaks_default, _ = survey_with_logs.peak_picker(
+        log_name="PosA",
+        pivot_col=("Lmax", "A"),
+        k=3,
+        high=True,
+    )
+    peaks_explicit, _ = survey_with_logs.peak_picker(
+        log_name="PosA",
+        pivot_col=("Lmax", "A"),
+        k=3,
+        high=True,
+        exclusion_zone_s=0,
+    )
+    pd.testing.assert_frame_equal(peaks_default, peaks_explicit)
+
+
+def test_peak_picker_exclusion_zone_lowest(survey_with_logs):
+    """exclusion_zone_s works with high=False (lowest)."""
+    peaks_df, _ = survey_with_logs.peak_picker(
+        log_name="PosA",
+        pivot_col=("Lmax", "A"),
+        k=2,
+        high=False,
+        exclusion_zone_s=900,
+    )
+
+    # Bottom Lmax A values with 15 min exclusion:
+    #   - Lowest: 50.0 at 00:00
+    #   - Next: 52.0 at 06:45 — outside 15 min of 00:00, PICK
+    assert len(peaks_df) == 2
+    assert peaks_df[("Lmax", "A")].iloc[0] == 50.0
+    assert peaks_df[("Lmax", "A")].iloc[1] == 52.0

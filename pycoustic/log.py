@@ -458,67 +458,105 @@ class Log:
         return conc.dropna(axis=0, how="all")
 
     def get_nth_high_low(
-            self,
-            n: int = 10,
-            data: pd.DataFrame | None = None,
-            pivot_col: tuple[Any, Any] | None = None,
-            all_cols: bool = False,
-            high: bool = True,
-            count: int = 1,
-            group_by_date: bool = True,
-    ) -> pd.DataFrame:
-        """
-        Return the nth-highest or nth-lowest values for the specified parameter.
+                self,
+                n: int = 10,
+                data: pd.DataFrame | None = None,
+                pivot_col: tuple[Any, Any] | None = None,
+                all_cols: bool = False,
+                high: bool = True,
+                count: int = 1,
+                group_by_date: bool = True,
+                exclusion_zone_s: float = 0,
+        ) -> pd.DataFrame:
+            """
+            Return the nth-highest or nth-lowest values for the specified parameter.
 
-        :param n: The rank to start from (1-indexed).
-        :param data: Input dataframe.
-        :param pivot_col: Column used for ranking.
-        :param all_cols: If True, return all columns for the selected rows.
-        :param high: True for highest values, False for lowest.
-        :param count: Number of consecutive rows to return starting from rank n.
-        :param group_by_date: If True, group by date and return per-date results.
-                              If False, treat the entire dataset as one group.
-        :return: Dataframe of ranked values.
-        """
-        if data is None:
-            data = self._master
-        if pivot_col is None:
-            pivot_col = ("Lmax", "A")
+            :param n: The rank to start from (1-indexed).
+            :param data: Input dataframe.
+            :param pivot_col: Column used for ranking.
+            :param all_cols: If True, return all columns for the selected rows.
+            :param high: True for highest values, False for lowest.
+            :param count: Number of consecutive rows to return starting from rank n.
+            :param group_by_date: If True, group by date and return per-date results.
+                                  If False, treat the entire dataset as one group.
+            :param exclusion_zone_s: If > 0, no two selected peaks can be within this
+                                     many seconds of each other (greedy selection).
+                                     Not supported with group_by_date=True.
+            :return: Dataframe of ranked values.
+            """
+            if data is None:
+                data = self._master
+            if pivot_col is None:
+                pivot_col = ("Lmax", "A")
 
-        if pivot_col not in data.columns:
-            return pd.DataFrame()
-
-        # Use stable sort with the index as a secondary key so that ties in the
-        # pivot column are always broken by time-of-night (earliest first), making
-        # the result deterministic across pandas/numpy versions.
-        nth = data.copy()
-        nth["_sort_idx"] = nth.index
-        nth = nth.sort_values(
-            by=[pivot_col, "_sort_idx"],
-            ascending=[not high, True],
-            kind="stable",
-        )
-        # Use del instead of df.drop() to avoid PerformanceWarning
-        # when removing a plain string column from a DataFrame whose
-        # other columns are tuples (mixed-type column Index).
-        del nth["_sort_idx"]
-        nth["Time"] = nth.index.time
-
-        # Build the list of 0-indexed rows to select: start from rank n-1
-        rows = list(range(n - 1, n - 1 + count))
-
-        if group_by_date:
-            if all_cols:
-                return nth.groupby(by=nth.index.date).nth(rows)
-            return nth[[pivot_col[0], "Time"]].groupby(by=nth.index.date).nth(rows)
-        else:
-            # Clamp to available rows -- same graceful behaviour as groupby.nth
-            if not rows or min(rows) >= len(nth):
+            if pivot_col not in data.columns:
                 return pd.DataFrame()
-            rows = [r for r in rows if r < len(nth)]
-            if all_cols:
-                return nth.iloc[rows]
-            return nth[[pivot_col[0], "Time"]].iloc[rows]
+
+            if exclusion_zone_s > 0 and group_by_date:
+                raise ValueError(
+                    "exclusion_zone_s is not supported with group_by_date=True"
+                )
+
+            # Use stable sort with the index as a secondary key so that ties in the
+            # pivot column are always broken by time-of-night (earliest first), making
+            # the result deterministic across pandas/numpy versions.
+            nth = data.copy()
+            nth["_sort_idx"] = nth.index
+            nth = nth.sort_values(
+                by=[pivot_col, "_sort_idx"],
+                ascending=[not high, True],
+                kind="stable",
+            )
+            # Use del instead of df.drop() to avoid PerformanceWarning
+            # when removing a plain string column from a DataFrame whose
+            # other columns are tuples (mixed-type column Index).
+            del nth["_sort_idx"]
+            nth["Time"] = nth.index.time
+
+            # Build the list of 0-indexed rows to select: start from rank n-1
+            rows = list(range(n - 1, n - 1 + count))
+
+            if exclusion_zone_s > 0:
+                # Greedy selection: pick the next best, exclude nearby timestamps
+                td = pd.Timedelta(seconds=exclusion_zone_s)
+                selected_rows = []
+                candidate = nth.copy()
+
+                if not high:
+                    candidate = candidate.sort_values(
+                        by=[pivot_col],
+                        ascending=True,
+                        kind="stable",
+                    )
+
+                while len(selected_rows) < count and not candidate.empty:
+                    # Pick the current best row (first after sort)
+                    best_idx = candidate.index[0]
+                    selected_rows.append(best_idx)
+
+                    # Remove all rows within the exclusion zone of this peak
+                    mask = (candidate.index < best_idx - td) | (candidate.index > best_idx + td)
+                    candidate = candidate.loc[mask]
+
+                if not selected_rows:
+                    return pd.DataFrame()
+
+                if all_cols:
+                    return nth.loc[selected_rows]
+                return nth.loc[selected_rows, [pivot_col[0], "Time"]]
+
+            if group_by_date:
+                if all_cols:
+                    return nth.groupby(by=nth.index.date).nth(rows)
+                return nth[[pivot_col[0], "Time"]].groupby(by=nth.index.date).nth(rows)
+            else:
+                # Clamp to available rows -- same graceful behaviour as groupby.nth
+                if not rows or min(rows) >= len(nth):
+                    return pd.DataFrame()
+                rows = [r for r in rows if r < len(nth)]
+                if all_cols:
+                    return nth.iloc[rows]
+                return nth[[pivot_col[0], "Time"]].iloc[rows]
 
     def get_modal(
             self,
