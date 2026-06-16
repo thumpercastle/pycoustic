@@ -6,13 +6,10 @@ import pandas as pd
 import pgeocode as geo
 import requests
 
+from .log import DEFAULT_PERIODS
 from .weather import WeatherHistory
 
 DECIMALS = 1
-DEFAULT_PERIODS = {"day": (7, 0), "evening": (23, 0), "night": (23, 0)}
-
-pd.set_option("display.max_columns", None)
-pd.set_option("display.max_rows", None)
 
 
 class Survey:

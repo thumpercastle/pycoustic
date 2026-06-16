@@ -12,67 +12,6 @@ DEFAULT_PERIODS = {"day": (7, 0), "evening": (23, 0), "night": (23, 0)}
 NIGHT_IDX_LABEL = "Night idx"
 NIGHT_IDX_COLUMN = (NIGHT_IDX_LABEL, "")
 
-wb_weighting_dB = [
-    -8.4,
-    -8.3,
-    -8.3,
-    -8.1,
-    -7.6,
-    -6.1,
-    -3.5,
-    -1.1,
-    0.2,
-    0.5,
-    0.2,
-    -0.2,
-    -0.9,
-    -1.8,
-    -3.0,
-    -4.5,
-    -6.2,
-    -8.1,
-    -10.1,
-    -12.4,
-    -15.2,
-    -18.8,
-    -23.2,
-    -28.4,
-    -34.0,
-    -39.8,
-    -45.8,
-]
-
-wb_weighting_factors = [
-    0.381,
-    0.385,
-    0.386,
-    0.392,
-    0.417,
-    0.496,
-    0.665,
-    0.885,
-    1.026,
-    1.054,
-    1.026,
-    0.974,
-    0.904,
-    0.814,
-    0.709,
-    0.597,
-    0.491,
-    0.395,
-    0.312,
-    0.239,
-    0.173,
-    0.115,
-    0.069,
-    0.039,
-    0.02,
-    0.02,
-    0.005,
-]
-
-
 class Log:
     def __init__(self, path: str = "") -> None:
         """
@@ -161,7 +100,7 @@ class Log:
         return pd.DataFrame(columns=columns)
 
     @staticmethod
-    def _none_if_zero(df: pd.DataFrame | pd.Series) -> pd.DataFrame | pd.Series | None:
+    def _none_if_empty(df: pd.DataFrame | pd.Series) -> pd.DataFrame | pd.Series | None:
         return None if len(df) == 0 else df
 
     @staticmethod
@@ -306,7 +245,7 @@ class Log:
                     )
                 else:
                     recomputed[idx] = data[idx].resample(t).mean().round(self._decimals)
-        return self._none_if_zero(recomputed)
+        return self._none_if_empty(recomputed)
 
     def _recompute_night_idx(self, data: pd.DataFrame | None = None, t: str = "15min") -> pd.DataFrame | None:
         """
@@ -558,7 +497,11 @@ class Log:
             by=[pivot_col, "_sort_idx"],
             ascending=[not high, True],
             kind="stable",
-        ).drop(columns=["_sort_idx"])
+        )
+        # Use del instead of df.drop() to avoid PerformanceWarning
+        # when removing a plain string column from a DataFrame whose
+        # other columns are tuples (mixed-type column Index).
+        del nth["_sort_idx"]
         nth["Time"] = nth.index.time
 
         # Build the list of 0-indexed rows to select: start from rank n-1
@@ -694,6 +637,13 @@ class VibLog(Log):
     This class is a work in progress. Do not use.
     """
 
+    WB_WEIGHTING_FACTORS = [
+        0.381, 0.385, 0.386, 0.392, 0.417, 0.496, 0.665, 0.885,
+        1.026, 1.054, 1.026, 0.974, 0.904, 0.814, 0.709, 0.597,
+        0.491, 0.395, 0.312, 0.239, 0.173, 0.115, 0.069, 0.039,
+        0.02, 0.02, 0.005,
+    ]
+
     def __init__(self, path: str, units: str | None = None) -> None:
         super().__init__(path)
         self._units = units
@@ -705,11 +655,13 @@ class VibLog(Log):
     def head(self) -> pd.DataFrame:
         return self._master.head()
 
-    def apply_wb_weighting(self, factors: list[float] = wb_weighting_factors) -> pd.DataFrame:
+    def apply_wb_weighting(self, factors: list[float] | None = None) -> pd.DataFrame:
         """
         Multiply each numeric column in self._master by the corresponding WB weighting factor
         and store the result in self._wb_weighted.
         """
+        if factors is None:
+            factors = self.WB_WEIGHTING_FACTORS
         numeric_cols = self._master.select_dtypes(include="number").columns
 
         if len(numeric_cols) != len(factors):
