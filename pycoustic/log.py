@@ -389,10 +389,31 @@ class Log:
             idx = np.unique(data.index.date) if not data.empty else []
             return pd.DataFrame(index=idx, columns=expected_cols, dtype=float)
 
-        res = data[existing_cols].groupby(data.index.date).mean().apply(
+        grouped = data[existing_cols].groupby(data.index.date)
+        res = grouped.mean().apply(
             lambda x: self._db_from_antilog(x, self._decimals)
         )
+        for key in res.columns:
+            metric = key[0] if isinstance(key, tuple) else key
+            if metric not in {"Lmin", "Lmax", "Lpeak"}:
+                continue
+            aggregation = "min" if metric == "Lmin" else "max"
+            extrema = data[key].groupby(data.index.date).agg(aggregation)
+            res[key] = extrema.apply(lambda x: self._db_from_antilog(x, self._decimals))
         return res.reindex(columns=expected_cols)
+
+    def _aggregate_antilogs(self, data: pd.DataFrame, cols: list[Any]) -> pd.Series:
+        """Summarize selected antilog columns with their metric-specific operators."""
+        values = data[cols]
+        means = values.mean()
+        result = means.apply(lambda value: self._db_from_antilog(value, self._decimals))
+        for key in values.columns:
+            metric = key[0] if isinstance(key, tuple) else key
+            if metric not in {"Lmin", "Lmax", "Lpeak"}:
+                continue
+            aggregation = "min" if metric == "Lmin" else "max"
+            result[key] = self._db_from_antilog(getattr(values[key], aggregation)(), self._decimals)
+        return result
 
     def get_data(self) -> pd.DataFrame:
         """

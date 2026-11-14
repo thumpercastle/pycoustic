@@ -169,6 +169,43 @@ def test_log_handles_nan_values(nan_csv_path):
     assert not pd.isna(interval_data[("Leq", "A")].iloc[0])
 
 
+def test_per_date_summaries_use_metric_extrema_and_preserve_energy_and_ln_means():
+    index = pd.to_datetime([
+        "2024-01-01 12:00", "2024-01-01 12:01",
+        "2024-01-01 23:00", "2024-01-01 23:01",
+    ])
+    metrics = ["Leq", "Lmin", "Lmax", "Lpeak", "L90"]
+    df = pd.DataFrame({f"{metric} A": [30.0, 60.0, 30.0, 60.0] for metric in metrics}, index=index)
+    log = Log.from_dataframe(df, name="summary-probe")
+    columns = [(metric, "A") for metric in metrics]
+
+    per_date = log.leq_by_date(log.get_antilogs(), cols=columns)
+
+    assert per_date[columns[0]].iloc[0] == pytest.approx(57.0, abs=0.1)
+    assert per_date[columns[1]].iloc[0] == 30.0
+    assert per_date[columns[2]].iloc[0] == 60.0
+    assert per_date[columns[3]].iloc[0] == 60.0
+    # Preserve the existing mean aggregation for Ln metrics.
+    assert per_date[columns[4]].iloc[0] == pytest.approx(57.0, abs=0.1)
+
+    survey = Survey()
+    survey.add_log(log, name="summary-probe")
+    spectra = survey.leq_spectra(leq_cols=columns)
+    assert spectra.loc["summary-probe", ("Daytime", "Leq", "A")] == pytest.approx(57.0, abs=0.1)
+    assert spectra.loc["summary-probe", ("Daytime", "Lmin", "A")] == 30.0
+    assert spectra.loc["summary-probe", ("Daytime", "Lmax", "A")] == 60.0
+    assert spectra.loc["summary-probe", ("Daytime", "Lpeak", "A")] == 60.0
+    assert spectra.loc["summary-probe", ("Daytime", "L90", "A")] == pytest.approx(57.0, abs=0.1)
+
+    summary_cols = [key for key in columns if key[0] != "Lmax"]
+    summary = survey.broadband_summary(
+        leq_cols=summary_cols, max_cols=[("Lmax", "A")], lmax_n=1, lmax_t="1min"
+    )
+    row = summary.loc[("summary-probe", dt.date(2024, 1, 1))]
+    assert row[("Daytime", "Lmin", "A")] == 30.0
+    assert row[("Daytime", "Lpeak", "A")] == 60.0
+
+
 def test_resampling_uses_extrema_for_lmin_and_lpeak():
     """Resampled extrema preserve their physical min/max aggregation."""
     index = pd.date_range("2024-12-16 12:00", periods=2, freq="15min")
