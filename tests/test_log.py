@@ -219,6 +219,48 @@ def test_resampling_extrema_with_explicit_columns_and_missing_values():
     assert interval[("Leq", "A")].iloc[0] == 45.0
 
 
+@pytest.mark.parametrize(
+    ("metric", "expected"),
+    [("Lmin", 30.0), ("Lpeak", 60.0)],
+)
+def test_selected_extrema_use_minimum_or_maximum(metric, expected):
+    index = pd.date_range("2024-12-16 12:00", periods=2, freq="15min")
+    log = Log.from_dataframe(
+        pd.DataFrame({f"{metric} A": [30.0, 60.0]}, index=index)
+    )
+
+    interval = log.as_interval(
+        t="30min", leq_cols=[metric], max_pivots=[]
+    )
+
+    assert interval[(metric, "A")].iloc[0] == expected
+
+
+def test_extrema_resampling_uses_supplied_data_subset():
+    index = pd.date_range("2024-12-16 12:00", periods=2, freq="15min")
+    log = Log.from_dataframe(
+        pd.DataFrame(
+            {"Leq A": [30.0, 60.0], "Lmin A": [10.0, 40.0], "Lmax A": [30.0, 60.0], "Lpeak A": [30.0, 60.0]},
+            index=index,
+        )
+    )
+    data = log._master.iloc[1:]
+    antilogs = log._antilogs.iloc[1:]
+
+    interval = log.as_interval(
+        data=data,
+        antilogs=antilogs,
+        t="30min",
+        leq_cols=["Leq", "Lmin"],
+        max_pivots=[("Lmax", "A"), ("Lpeak", "A")],
+    )
+
+    assert interval[("Leq", "A")].iloc[0] == 60.0
+    assert interval[("Lmin", "A")].iloc[0] == 40.0
+    assert interval[("Lmax", "A")].iloc[0] == 60.0
+    assert interval[("Lpeak", "A")].iloc[0] == 60.0
+
+
 def test_log_malformed_headers(malformed_header_csv_path):
     """Test that CSVs with columns lacking a space don't trigger IndexError."""
     try:

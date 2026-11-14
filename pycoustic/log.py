@@ -239,10 +239,15 @@ class Log:
                 # Ln columns (L90, L10, etc.) default to arithmetic mean of dB
                 # to avoid physically-meaningless energy averaging of percentiles
                 if metric in {"Lmin", "Lmax", "Lpeak"}:
-                    source = self._master if averaging == "log" else data
-                    grouped = source[idx].resample(t)
+                    grouped = data[idx].resample(t)
                     extrema = grouped.min() if metric == "Lmin" else grouped.max()
-                    recomputed[idx] = extrema.round(self._decimals)
+                    if averaging == "log":
+                        extrema = extrema.apply(
+                            lambda value: self._db_from_antilog(value, self._decimals)
+                        )
+                    else:
+                        extrema = extrema.round(self._decimals)
+                    recomputed[idx] = extrema
                 elif self._is_ln_column(idx) and ln_averaging == "arithmetic":
                     recomputed[idx] = self._master[idx].resample(t).mean().round(self._decimals)
                 elif averaging == "log":
