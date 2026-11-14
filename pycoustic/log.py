@@ -230,14 +230,25 @@ class Log:
         if data is None:
             data = self._antilogs if averaging == "log" else self._master
         if cols is None:
-            cols = ["Leq", "L90"]
+            cols = ["Leq", "Lmin", "L90"]
 
         recomputed = self._empty_like_columns(data.columns)
         for idx in cols:
             if idx in data.columns:
+                metric = idx[0] if isinstance(idx, tuple) else idx.split(" ", 1)[0]
                 # Ln columns (L90, L10, etc.) default to arithmetic mean of dB
                 # to avoid physically-meaningless energy averaging of percentiles
-                if self._is_ln_column(idx) and ln_averaging == "arithmetic":
+                if metric in {"Lmin", "Lmax", "Lpeak"}:
+                    grouped = data[idx].resample(t)
+                    extrema = grouped.min() if metric == "Lmin" else grouped.max()
+                    if averaging == "log":
+                        extrema = extrema.apply(
+                            lambda value: self._db_from_antilog(value, self._decimals)
+                        )
+                    else:
+                        extrema = extrema.round(self._decimals)
+                    recomputed[idx] = extrema
+                elif self._is_ln_column(idx) and ln_averaging == "arithmetic":
                     recomputed[idx] = self._master[idx].resample(t).mean().round(self._decimals)
                 elif averaging == "log":
                     recomputed[idx] = data[idx].resample(t).mean().apply(
@@ -282,7 +293,7 @@ class Log:
         :return: Dataframe with recomputed maxima.
         """
         if pivot_cols is None:
-            pivot_cols = [("Lmax", "A")]
+            pivot_cols = [("Lmax", "A"), ("Lpeak", "A")]
         if data is None:
             data = self._master
 
@@ -378,10 +389,31 @@ class Log:
             idx = np.unique(data.index.date) if not data.empty else []
             return pd.DataFrame(index=idx, columns=expected_cols, dtype=float)
 
-        res = data[existing_cols].groupby(data.index.date).mean().apply(
+        grouped = data[existing_cols].groupby(data.index.date)
+        res = grouped.mean().apply(
             lambda x: self._db_from_antilog(x, self._decimals)
         )
+        for key in res.columns:
+            metric = key[0] if isinstance(key, tuple) else key
+            if metric not in {"Lmin", "Lmax", "Lpeak"}:
+                continue
+            aggregation = "min" if metric == "Lmin" else "max"
+            extrema = data[key].groupby(data.index.date).agg(aggregation)
+            res[key] = extrema.apply(lambda x: self._db_from_antilog(x, self._decimals))
         return res.reindex(columns=expected_cols)
+
+    def _aggregate_antilogs(self, data: pd.DataFrame, cols: list[Any]) -> pd.Series:
+        """Summarize selected antilog columns with their metric-specific operators."""
+        values = data[cols]
+        means = values.mean()
+        result = means.apply(lambda value: self._db_from_antilog(value, self._decimals))
+        for key in values.columns:
+            metric = key[0] if isinstance(key, tuple) else key
+            if metric not in {"Lmin", "Lmax", "Lpeak"}:
+                continue
+            aggregation = "min" if metric == "Lmin" else "max"
+            result[key] = self._db_from_antilog(getattr(values[key], aggregation)(), self._decimals)
+        return result
 
     def get_data(self) -> pd.DataFrame:
         """
@@ -433,9 +465,9 @@ class Log:
         if antilogs is None:
             antilogs = self._antilogs
         if leq_cols is None:
-            leq_cols = ["Leq", "L90"]
+            leq_cols = ["Leq", "Lmin", "L90"]
         if max_pivots is None:
-            max_pivots = [("Lmax", "A")]
+            max_pivots = [("Lmax", "A"), ("Lpeak", "A")]
 
         parts: list[pd.DataFrame] = []
 

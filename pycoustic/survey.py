@@ -475,14 +475,14 @@ class Survey:
             days = log.get_period(data=log.get_antilogs(), period="days")
             valid_cols = self._existing_columns(days, leq_cols)
             if valid_cols:
-                days = days[valid_cols].apply(self._db_mean)
+                days = log._aggregate_antilogs(days, valid_cols)
             else:
                 days = pd.Series(dtype=float)
 
             nights = log.get_period(data=log.get_antilogs(), period="nights")
             valid_cols = self._existing_columns(nights, leq_cols)
             if valid_cols:
-                nights = nights[valid_cols].apply(self._db_mean)
+                nights = log._aggregate_antilogs(nights, valid_cols)
             else:
                 nights = pd.Series(dtype=float)
 
@@ -490,7 +490,7 @@ class Survey:
                 evenings = log.get_period(data=log.get_antilogs(), period="evenings")
                 valid_cols = self._existing_columns(evenings, leq_cols)
                 if valid_cols:
-                    evenings = evenings[valid_cols].apply(self._db_mean)
+                    evenings = log._aggregate_antilogs(evenings, valid_cols)
                 else:
                     evenings = pd.Series(dtype=float)
                 df = pd.concat([days, evenings, nights], axis=1, keys=["Daytime", "Evening", "Night-time"])
