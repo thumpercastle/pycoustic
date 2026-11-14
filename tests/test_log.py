@@ -169,6 +169,56 @@ def test_log_handles_nan_values(nan_csv_path):
     assert not pd.isna(interval_data[("Leq", "A")].iloc[0])
 
 
+def test_resampling_uses_extrema_for_lmin_and_lpeak():
+    """Resampled extrema preserve their physical min/max aggregation."""
+    index = pd.date_range("2024-12-16 12:00", periods=2, freq="15min")
+    df = pd.DataFrame(
+        {
+            "Leq A": [30.0, 60.0],
+            "Lmax A": [30.0, 60.0],
+            "Lmin A": [30.0, 60.0],
+            "Lpeak A": [30.0, 60.0],
+            "L90 A": [30.0, 60.0],
+        },
+        index=index,
+    )
+    log = Log.from_dataframe(df)
+
+    interval = log.as_interval(t="30min")
+
+    assert interval[("Lmin", "A")].iloc[0] == 30.0
+    assert interval[("Lpeak", "A")].iloc[0] == 60.0
+    assert interval[("Lmax", "A")].iloc[0] == 60.0
+    assert interval[("Leq", "A")].iloc[0] == pytest.approx(57.0, abs=0.1)
+    assert interval[("L90", "A")].iloc[0] == 45.0
+
+
+def test_resampling_extrema_with_explicit_columns_and_missing_values():
+    index = pd.date_range("2024-12-16 12:00", periods=2, freq="15min")
+    df = pd.DataFrame(
+        {
+            "Leq A": [30.0, 60.0],
+            "Lmin A": [np.nan, 25.0],
+            "Lmax A": [50.0, 60.0],
+            "Lpeak A": [55.0, 65.0],
+        },
+        index=index,
+    )
+    log = Log.from_dataframe(df)
+
+    interval = log.as_interval(
+        t="30min",
+        leq_cols=["Leq", "Lmin", "Lmax", "Lpeak"],
+        max_pivots=[],
+        averaging="arithmetic",
+    )
+
+    assert interval[("Lmin", "A")].iloc[0] == 25.0
+    assert interval[("Lmax", "A")].iloc[0] == 60.0
+    assert interval[("Lpeak", "A")].iloc[0] == 65.0
+    assert interval[("Leq", "A")].iloc[0] == 45.0
+
+
 def test_log_malformed_headers(malformed_header_csv_path):
     """Test that CSVs with columns lacking a space don't trigger IndexError."""
     try:

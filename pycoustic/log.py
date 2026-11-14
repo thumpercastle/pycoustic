@@ -230,14 +230,20 @@ class Log:
         if data is None:
             data = self._antilogs if averaging == "log" else self._master
         if cols is None:
-            cols = ["Leq", "L90"]
+            cols = ["Leq", "Lmin", "L90"]
 
         recomputed = self._empty_like_columns(data.columns)
         for idx in cols:
             if idx in data.columns:
+                metric = idx[0] if isinstance(idx, tuple) else idx.split(" ", 1)[0]
                 # Ln columns (L90, L10, etc.) default to arithmetic mean of dB
                 # to avoid physically-meaningless energy averaging of percentiles
-                if self._is_ln_column(idx) and ln_averaging == "arithmetic":
+                if metric in {"Lmin", "Lmax", "Lpeak"}:
+                    source = self._master if averaging == "log" else data
+                    grouped = source[idx].resample(t)
+                    extrema = grouped.min() if metric == "Lmin" else grouped.max()
+                    recomputed[idx] = extrema.round(self._decimals)
+                elif self._is_ln_column(idx) and ln_averaging == "arithmetic":
                     recomputed[idx] = self._master[idx].resample(t).mean().round(self._decimals)
                 elif averaging == "log":
                     recomputed[idx] = data[idx].resample(t).mean().apply(
@@ -282,7 +288,7 @@ class Log:
         :return: Dataframe with recomputed maxima.
         """
         if pivot_cols is None:
-            pivot_cols = [("Lmax", "A")]
+            pivot_cols = [("Lmax", "A"), ("Lpeak", "A")]
         if data is None:
             data = self._master
 
@@ -433,9 +439,9 @@ class Log:
         if antilogs is None:
             antilogs = self._antilogs
         if leq_cols is None:
-            leq_cols = ["Leq", "L90"]
+            leq_cols = ["Leq", "Lmin", "L90"]
         if max_pivots is None:
-            max_pivots = [("Lmax", "A")]
+            max_pivots = [("Lmax", "A"), ("Lpeak", "A")]
 
         parts: list[pd.DataFrame] = []
 
